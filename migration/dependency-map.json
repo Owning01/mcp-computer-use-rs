@@ -1,0 +1,1726 @@
+{
+  "generatedAt": "2026-10-18T23:41:27.119Z",
+  "generator": "scan-inventory.mjs (repo-migrate F1)",
+  "root": "G:/Proyectos/MCP/computer-use2",
+  "totals": {
+    "filesScanned": 60,
+    "linesScanned": 23195,
+    "internalEdges": 71,
+    "externalSpecifiers": 16,
+    "spawnSites": 32,
+    "tests": 27
+  },
+  "declaredDeps": {
+    "name": "mcp-computer-use2",
+    "version": "1.0.0",
+    "dependencies": {
+      "@modelcontextprotocol/sdk": "1.30.0"
+    },
+    "devDependencies": {}
+  },
+  "modules": [
+    {
+      "path": "experiments/opencode_runner.js",
+      "lines": 330,
+      "kind": "js"
+    },
+    {
+      "path": "native/DesktopBridge.cs",
+      "lines": 614,
+      "kind": "cs"
+    },
+    {
+      "path": "native/NativeIndicator.cs",
+      "lines": 399,
+      "kind": "cs"
+    },
+    {
+      "path": "native/runtime.ps1",
+      "lines": 1398,
+      "kind": "ps1"
+    },
+    {
+      "path": "native/wgc/ComputerUseWgc.csproj",
+      "lines": 21,
+      "kind": "csproj"
+    },
+    {
+      "path": "native/wgc/Program.cs",
+      "lines": 577,
+      "kind": "cs"
+    },
+    {
+      "path": "src/handlers/agent_core.js",
+      "lines": 448,
+      "kind": "js"
+    },
+    {
+      "path": "src/handlers/audio_action.js",
+      "lines": 234,
+      "kind": "js"
+    },
+    {
+      "path": "src/handlers/awake.js",
+      "lines": 93,
+      "kind": "js"
+    },
+    {
+      "path": "src/handlers/background.js",
+      "lines": 586,
+      "kind": "js"
+    },
+    {
+      "path": "src/handlers/barrier.js",
+      "lines": 400,
+      "kind": "js"
+    },
+    {
+      "path": "src/handlers/calibrate_dpi.js",
+      "lines": 328,
+      "kind": "js"
+    },
+    {
+      "path": "src/handlers/capture.js",
+      "lines": 347,
+      "kind": "js"
+    },
+    {
+      "path": "src/handlers/context_menu.js",
+      "lines": 217,
+      "kind": "js"
+    },
+    {
+      "path": "src/handlers/drag_scroll.js",
+      "lines": 269,
+      "kind": "js"
+    },
+    {
+      "path": "src/handlers/incidents.js",
+      "lines": 472,
+      "kind": "js"
+    },
+    {
+      "path": "src/handlers/indicator.js",
+      "lines": 329,
+      "kind": "js"
+    },
+    {
+      "path": "src/handlers/lock.js",
+      "lines": 684,
+      "kind": "js"
+    },
+    {
+      "path": "src/handlers/macros.js",
+      "lines": 538,
+      "kind": "js"
+    },
+    {
+      "path": "src/handlers/sandbox.js",
+      "lines": 37,
+      "kind": "js"
+    },
+    {
+      "path": "src/handlers/snapshot.js",
+      "lines": 581,
+      "kind": "js"
+    },
+    {
+      "path": "src/handlers/system_tray.js",
+      "lines": 406,
+      "kind": "js"
+    },
+    {
+      "path": "src/handlers/tasks.js",
+      "lines": 207,
+      "kind": "js"
+    },
+    {
+      "path": "src/handlers/toast_action.js",
+      "lines": 215,
+      "kind": "js"
+    },
+    {
+      "path": "src/handlers/verify.js",
+      "lines": 139,
+      "kind": "js"
+    },
+    {
+      "path": "src/index.js",
+      "lines": 6804,
+      "kind": "js"
+    },
+    {
+      "path": "src/ocr_worker.py",
+      "lines": 208,
+      "kind": "py"
+    },
+    {
+      "path": "src/utils/browser_cdp.js",
+      "lines": 341,
+      "kind": "js"
+    },
+    {
+      "path": "src/utils/browser_profiles.js",
+      "lines": 75,
+      "kind": "js"
+    },
+    {
+      "path": "src/utils/error_recovery.js",
+      "lines": 133,
+      "kind": "js"
+    },
+    {
+      "path": "src/utils/ps_daemon.js",
+      "lines": 191,
+      "kind": "js"
+    },
+    {
+      "path": "src/utils/ps_runner.js",
+      "lines": 121,
+      "kind": "js"
+    },
+    {
+      "path": "src/utils/runtime_env.js",
+      "lines": 19,
+      "kind": "js"
+    },
+    {
+      "path": "tests/agent_core_unit.test.js",
+      "lines": 142,
+      "kind": "js"
+    },
+    {
+      "path": "tests/background_unit.test.js",
+      "lines": 265,
+      "kind": "js"
+    },
+    {
+      "path": "tests/barrier_unit.test.js",
+      "lines": 368,
+      "kind": "js"
+    },
+    {
+      "path": "tests/browser_cdp_unit.test.js",
+      "lines": 22,
+      "kind": "js"
+    },
+    {
+      "path": "tests/capture_unit.test.js",
+      "lines": 178,
+      "kind": "js"
+    },
+    {
+      "path": "tests/challenger_1_stress_suite.js",
+      "lines": 369,
+      "kind": "js"
+    },
+    {
+      "path": "tests/challenger_stress_suite.js",
+      "lines": 549,
+      "kind": "js"
+    },
+    {
+      "path": "tests/contract_smoke.js",
+      "lines": 628,
+      "kind": "js"
+    },
+    {
+      "path": "tests/e2e_sota_suite.js",
+      "lines": 165,
+      "kind": "js"
+    },
+    {
+      "path": "tests/incidents_unit.test.js",
+      "lines": 331,
+      "kind": "js"
+    },
+    {
+      "path": "tests/indicator_unit.test.js",
+      "lines": 51,
+      "kind": "js"
+    },
+    {
+      "path": "tests/lock_race.test.js",
+      "lines": 134,
+      "kind": "js"
+    },
+    {
+      "path": "tests/lock_unit.test.js",
+      "lines": 320,
+      "kind": "js"
+    },
+    {
+      "path": "tests/macros_unit.test.js",
+      "lines": 515,
+      "kind": "js"
+    },
+    {
+      "path": "tests/orca_patterns.test.js",
+      "lines": 89,
+      "kind": "js"
+    },
+    {
+      "path": "tests/policy_unit.test.js",
+      "lines": 192,
+      "kind": "js"
+    },
+    {
+      "path": "tests/ps_runner_unit.test.js",
+      "lines": 63,
+      "kind": "js"
+    },
+    {
+      "path": "tests/sandbox_unit.test.js",
+      "lines": 12,
+      "kind": "js"
+    },
+    {
+      "path": "tests/snapshot_unit.test.js",
+      "lines": 136,
+      "kind": "js"
+    },
+    {
+      "path": "tests/tasks_unit.test.js",
+      "lines": 241,
+      "kind": "js"
+    },
+    {
+      "path": "tests/test_indicator_and_screenshot.js",
+      "lines": 116,
+      "kind": "js"
+    },
+    {
+      "path": "tests/test_indicator_screenshot.js",
+      "lines": 25,
+      "kind": "js"
+    },
+    {
+      "path": "tests/test_live_mcp.js",
+      "lines": 106,
+      "kind": "js"
+    },
+    {
+      "path": "tests/test_mcp_diag.js",
+      "lines": 29,
+      "kind": "js"
+    },
+    {
+      "path": "tests/test_snap_diag.js",
+      "lines": 37,
+      "kind": "js"
+    },
+    {
+      "path": "tests/verify_unit.test.js",
+      "lines": 134,
+      "kind": "js"
+    },
+    {
+      "path": "tests/wgc_live.test.js",
+      "lines": 217,
+      "kind": "js"
+    }
+  ],
+  "edges": [
+    {
+      "from": "src/handlers/agent_core.js",
+      "to": "src/handlers/sandbox.js",
+      "spec": "./sandbox.js",
+      "resolved": true,
+      "evidence": "src/handlers/agent_core.js:8",
+      "count": 1
+    },
+    {
+      "from": "src/handlers/audio_action.js",
+      "to": "src/utils/ps_runner.js",
+      "spec": "../utils/ps_runner.js",
+      "resolved": true,
+      "evidence": "src/handlers/audio_action.js:1",
+      "count": 1
+    },
+    {
+      "from": "src/handlers/awake.js",
+      "to": "src/utils/ps_runner.js",
+      "spec": "../utils/ps_runner.js",
+      "resolved": true,
+      "evidence": "src/handlers/awake.js:5",
+      "count": 1
+    },
+    {
+      "from": "src/handlers/background.js",
+      "to": "src/utils/ps_runner.js",
+      "spec": "../utils/ps_runner.js",
+      "resolved": true,
+      "evidence": "src/handlers/background.js:26",
+      "count": 1
+    },
+    {
+      "from": "src/handlers/calibrate_dpi.js",
+      "to": "src/utils/ps_runner.js",
+      "spec": "../utils/ps_runner.js",
+      "resolved": true,
+      "evidence": "src/handlers/calibrate_dpi.js:1",
+      "count": 1
+    },
+    {
+      "from": "src/handlers/context_menu.js",
+      "to": "src/utils/ps_runner.js",
+      "spec": "../utils/ps_runner.js",
+      "resolved": true,
+      "evidence": "src/handlers/context_menu.js:1",
+      "count": 1
+    },
+    {
+      "from": "src/handlers/drag_scroll.js",
+      "to": "src/utils/ps_runner.js",
+      "spec": "../utils/ps_runner.js",
+      "resolved": true,
+      "evidence": "src/handlers/drag_scroll.js:1",
+      "count": 1
+    },
+    {
+      "from": "src/handlers/incidents.js",
+      "to": "src/handlers/macros.js",
+      "spec": "./macros.js",
+      "resolved": true,
+      "evidence": "src/handlers/incidents.js:20",
+      "count": 1
+    },
+    {
+      "from": "src/handlers/incidents.js",
+      "to": "src/utils/runtime_env.js",
+      "spec": "../utils/runtime_env.js",
+      "resolved": true,
+      "evidence": "src/handlers/incidents.js:19",
+      "count": 1
+    },
+    {
+      "from": "src/handlers/indicator.js",
+      "to": "src/utils/ps_runner.js",
+      "spec": "../utils/ps_runner.js",
+      "resolved": true,
+      "evidence": "src/handlers/indicator.js:8",
+      "count": 1
+    },
+    {
+      "from": "src/handlers/lock.js",
+      "to": "src/utils/runtime_env.js",
+      "spec": "../utils/runtime_env.js",
+      "resolved": true,
+      "evidence": "src/handlers/lock.js:17",
+      "count": 1
+    },
+    {
+      "from": "src/handlers/snapshot.js",
+      "to": "src/utils/ps_runner.js",
+      "spec": "../utils/ps_runner.js",
+      "resolved": true,
+      "evidence": "src/handlers/snapshot.js:7",
+      "count": 1
+    },
+    {
+      "from": "src/handlers/system_tray.js",
+      "to": "src/utils/ps_runner.js",
+      "spec": "../utils/ps_runner.js",
+      "resolved": true,
+      "evidence": "src/handlers/system_tray.js:1",
+      "count": 1
+    },
+    {
+      "from": "src/handlers/toast_action.js",
+      "to": "src/utils/ps_runner.js",
+      "spec": "../utils/ps_runner.js",
+      "resolved": true,
+      "evidence": "src/handlers/toast_action.js:1",
+      "count": 1
+    },
+    {
+      "from": "src/index.js",
+      "to": "src/handlers/agent_core.js",
+      "spec": "./handlers/agent_core.js",
+      "resolved": true,
+      "evidence": "src/index.js:42",
+      "count": 1
+    },
+    {
+      "from": "src/index.js",
+      "to": "src/handlers/audio_action.js",
+      "spec": "./handlers/audio_action.js",
+      "resolved": true,
+      "evidence": "src/index.js:19",
+      "count": 1
+    },
+    {
+      "from": "src/index.js",
+      "to": "src/handlers/awake.js",
+      "spec": "./handlers/awake.js",
+      "resolved": true,
+      "evidence": "src/index.js:27",
+      "count": 1
+    },
+    {
+      "from": "src/index.js",
+      "to": "src/handlers/background.js",
+      "spec": "./handlers/background.js",
+      "resolved": true,
+      "evidence": "src/index.js:25",
+      "count": 1
+    },
+    {
+      "from": "src/index.js",
+      "to": "src/handlers/barrier.js",
+      "spec": "./handlers/barrier.js",
+      "resolved": true,
+      "evidence": "src/index.js:26",
+      "count": 1
+    },
+    {
+      "from": "src/index.js",
+      "to": "src/handlers/calibrate_dpi.js",
+      "spec": "./handlers/calibrate_dpi.js",
+      "resolved": true,
+      "evidence": "src/index.js:18",
+      "count": 1
+    },
+    {
+      "from": "src/index.js",
+      "to": "src/handlers/capture.js",
+      "spec": "./handlers/capture.js",
+      "resolved": true,
+      "evidence": "src/index.js:13",
+      "count": 1
+    },
+    {
+      "from": "src/index.js",
+      "to": "src/handlers/context_menu.js",
+      "spec": "./handlers/context_menu.js",
+      "resolved": true,
+      "evidence": "src/index.js:16",
+      "count": 1
+    },
+    {
+      "from": "src/index.js",
+      "to": "src/handlers/drag_scroll.js",
+      "spec": "./handlers/drag_scroll.js",
+      "resolved": true,
+      "evidence": "src/index.js:17",
+      "count": 1
+    },
+    {
+      "from": "src/index.js",
+      "to": "src/handlers/incidents.js",
+      "spec": "./handlers/incidents.js",
+      "resolved": true,
+      "evidence": "src/index.js:21",
+      "count": 1
+    },
+    {
+      "from": "src/index.js",
+      "to": "src/handlers/indicator.js",
+      "spec": "./handlers/indicator.js",
+      "resolved": true,
+      "evidence": "src/index.js:28",
+      "count": 1
+    },
+    {
+      "from": "src/index.js",
+      "to": "src/handlers/lock.js",
+      "spec": "./handlers/lock.js",
+      "resolved": true,
+      "evidence": "src/index.js:20",
+      "count": 1
+    },
+    {
+      "from": "src/index.js",
+      "to": "src/handlers/macros.js",
+      "spec": "./handlers/macros.js",
+      "resolved": true,
+      "evidence": "src/index.js:24",
+      "count": 1
+    },
+    {
+      "from": "src/index.js",
+      "to": "src/handlers/sandbox.js",
+      "spec": "./handlers/sandbox.js",
+      "resolved": true,
+      "evidence": "src/index.js:34",
+      "count": 1
+    },
+    {
+      "from": "src/index.js",
+      "to": "src/handlers/snapshot.js",
+      "spec": "./handlers/snapshot.js",
+      "resolved": true,
+      "evidence": "src/index.js:22",
+      "count": 1
+    },
+    {
+      "from": "src/index.js",
+      "to": "src/handlers/system_tray.js",
+      "spec": "./handlers/system_tray.js",
+      "resolved": true,
+      "evidence": "src/index.js:14",
+      "count": 1
+    },
+    {
+      "from": "src/index.js",
+      "to": "src/handlers/tasks.js",
+      "spec": "./handlers/tasks.js",
+      "resolved": true,
+      "evidence": "src/index.js:29",
+      "count": 1
+    },
+    {
+      "from": "src/index.js",
+      "to": "src/handlers/toast_action.js",
+      "spec": "./handlers/toast_action.js",
+      "resolved": true,
+      "evidence": "src/index.js:15",
+      "count": 1
+    },
+    {
+      "from": "src/index.js",
+      "to": "src/handlers/verify.js",
+      "spec": "./handlers/verify.js",
+      "resolved": true,
+      "evidence": "src/index.js:23",
+      "count": 1
+    },
+    {
+      "from": "src/index.js",
+      "to": "src/utils/browser_cdp.js",
+      "spec": "./utils/browser_cdp.js",
+      "resolved": true,
+      "evidence": "src/index.js:33",
+      "count": 1
+    },
+    {
+      "from": "src/index.js",
+      "to": "src/utils/browser_profiles.js",
+      "spec": "./utils/browser_profiles.js",
+      "resolved": true,
+      "evidence": "src/index.js:32",
+      "count": 1
+    },
+    {
+      "from": "src/index.js",
+      "to": "src/utils/error_recovery.js",
+      "spec": "./utils/error_recovery.js",
+      "resolved": true,
+      "evidence": "src/index.js:30",
+      "count": 1
+    },
+    {
+      "from": "src/index.js",
+      "to": "src/utils/ps_daemon.js",
+      "spec": "./utils/ps_daemon.js",
+      "resolved": true,
+      "evidence": "src/index.js:31",
+      "count": 1
+    },
+    {
+      "from": "tests/agent_core_unit.test.js",
+      "to": "src/handlers/agent_core.js",
+      "spec": "../src/handlers/agent_core.js",
+      "resolved": true,
+      "evidence": "tests/agent_core_unit.test.js:10",
+      "count": 1
+    },
+    {
+      "from": "tests/background_unit.test.js",
+      "to": "src/handlers/background.js",
+      "spec": "../src/handlers/background.js",
+      "resolved": true,
+      "evidence": "tests/background_unit.test.js:5",
+      "count": 1
+    },
+    {
+      "from": "tests/barrier_unit.test.js",
+      "to": "src/handlers/barrier.js",
+      "spec": "../src/handlers/barrier.js",
+      "resolved": true,
+      "evidence": "tests/barrier_unit.test.js:5",
+      "count": 1
+    },
+    {
+      "from": "tests/browser_cdp_unit.test.js",
+      "to": "src/utils/browser_cdp.js",
+      "spec": "../src/utils/browser_cdp.js",
+      "resolved": true,
+      "evidence": "tests/browser_cdp_unit.test.js:3",
+      "count": 1
+    },
+    {
+      "from": "tests/capture_unit.test.js",
+      "to": "src/handlers/capture.js",
+      "spec": "../src/handlers/capture.js",
+      "resolved": true,
+      "evidence": "tests/capture_unit.test.js:20",
+      "count": 1
+    },
+    {
+      "from": "tests/challenger_1_stress_suite.js",
+      "to": "src/handlers/context_menu.js",
+      "spec": "../src/handlers/context_menu.js",
+      "resolved": true,
+      "evidence": "tests/challenger_1_stress_suite.js:9",
+      "count": 1
+    },
+    {
+      "from": "tests/challenger_1_stress_suite.js",
+      "to": "src/handlers/system_tray.js",
+      "spec": "../src/handlers/system_tray.js",
+      "resolved": true,
+      "evidence": "tests/challenger_1_stress_suite.js:7",
+      "count": 1
+    },
+    {
+      "from": "tests/challenger_1_stress_suite.js",
+      "to": "src/handlers/toast_action.js",
+      "spec": "../src/handlers/toast_action.js",
+      "resolved": true,
+      "evidence": "tests/challenger_1_stress_suite.js:8",
+      "count": 1
+    },
+    {
+      "from": "tests/challenger_stress_suite.js",
+      "to": "src/handlers/audio_action.js",
+      "spec": "../src/handlers/audio_action.js",
+      "resolved": true,
+      "evidence": "tests/challenger_stress_suite.js:9",
+      "count": 1
+    },
+    {
+      "from": "tests/challenger_stress_suite.js",
+      "to": "src/handlers/calibrate_dpi.js",
+      "spec": "../src/handlers/calibrate_dpi.js",
+      "resolved": true,
+      "evidence": "tests/challenger_stress_suite.js:8",
+      "count": 1
+    },
+    {
+      "from": "tests/challenger_stress_suite.js",
+      "to": "src/handlers/drag_scroll.js",
+      "spec": "../src/handlers/drag_scroll.js",
+      "resolved": true,
+      "evidence": "tests/challenger_stress_suite.js:7",
+      "count": 1
+    },
+    {
+      "from": "tests/challenger_stress_suite.js",
+      "to": "src/utils/ps_runner.js",
+      "spec": "../src/utils/ps_runner.js",
+      "resolved": true,
+      "evidence": "tests/challenger_stress_suite.js:10",
+      "count": 1
+    },
+    {
+      "from": "tests/contract_smoke.js",
+      "to": "src/handlers/capture.js",
+      "spec": "../src/handlers/capture.js",
+      "resolved": true,
+      "evidence": "tests/contract_smoke.js:29",
+      "count": 1
+    },
+    {
+      "from": "tests/e2e_sota_suite.js",
+      "to": "src/handlers/audio_action.js",
+      "spec": "../src/handlers/audio_action.js",
+      "resolved": true,
+      "evidence": "tests/e2e_sota_suite.js:17",
+      "count": 1
+    },
+    {
+      "from": "tests/e2e_sota_suite.js",
+      "to": "src/handlers/calibrate_dpi.js",
+      "spec": "../src/handlers/calibrate_dpi.js",
+      "resolved": true,
+      "evidence": "tests/e2e_sota_suite.js:16",
+      "count": 1
+    },
+    {
+      "from": "tests/e2e_sota_suite.js",
+      "to": "src/handlers/context_menu.js",
+      "spec": "../src/handlers/context_menu.js",
+      "resolved": true,
+      "evidence": "tests/e2e_sota_suite.js:14",
+      "count": 1
+    },
+    {
+      "from": "tests/e2e_sota_suite.js",
+      "to": "src/handlers/drag_scroll.js",
+      "spec": "../src/handlers/drag_scroll.js",
+      "resolved": true,
+      "evidence": "tests/e2e_sota_suite.js:15",
+      "count": 1
+    },
+    {
+      "from": "tests/e2e_sota_suite.js",
+      "to": "src/handlers/system_tray.js",
+      "spec": "../src/handlers/system_tray.js",
+      "resolved": true,
+      "evidence": "tests/e2e_sota_suite.js:12",
+      "count": 1
+    },
+    {
+      "from": "tests/e2e_sota_suite.js",
+      "to": "src/handlers/toast_action.js",
+      "spec": "../src/handlers/toast_action.js",
+      "resolved": true,
+      "evidence": "tests/e2e_sota_suite.js:13",
+      "count": 1
+    },
+    {
+      "from": "tests/incidents_unit.test.js",
+      "to": "src/handlers/incidents.js",
+      "spec": "../src/handlers/incidents.js",
+      "resolved": true,
+      "evidence": "tests/incidents_unit.test.js:23",
+      "count": 1
+    },
+    {
+      "from": "tests/indicator_unit.test.js",
+      "to": "src/handlers/indicator.js",
+      "spec": "../src/handlers/indicator.js",
+      "resolved": true,
+      "evidence": "tests/indicator_unit.test.js:10",
+      "count": 1
+    },
+    {
+      "from": "tests/lock_race.test.js",
+      "to": "src/handlers/lock.js",
+      "spec": "../src/handlers/lock.js",
+      "resolved": true,
+      "evidence": "tests/lock_race.test.js:11",
+      "count": 1
+    },
+    {
+      "from": "tests/lock_unit.test.js",
+      "to": "src/handlers/lock.js",
+      "spec": "../src/handlers/lock.js",
+      "resolved": true,
+      "evidence": "tests/lock_unit.test.js:22",
+      "count": 2
+    },
+    {
+      "from": "tests/macros_unit.test.js",
+      "to": "src/handlers/macros.js",
+      "spec": "../src/handlers/macros.js",
+      "resolved": true,
+      "evidence": "tests/macros_unit.test.js:27",
+      "count": 1
+    },
+    {
+      "from": "tests/orca_patterns.test.js",
+      "to": "src/utils/error_recovery.js",
+      "spec": "../src/utils/error_recovery.js",
+      "resolved": true,
+      "evidence": "tests/orca_patterns.test.js:9",
+      "count": 1
+    },
+    {
+      "from": "tests/orca_patterns.test.js",
+      "to": "src/utils/ps_daemon.js",
+      "spec": "../src/utils/ps_daemon.js",
+      "resolved": true,
+      "evidence": "tests/orca_patterns.test.js:10",
+      "count": 1
+    },
+    {
+      "from": "tests/orca_patterns.test.js",
+      "to": "src/utils/ps_runner.js",
+      "spec": "../src/utils/ps_runner.js",
+      "resolved": true,
+      "evidence": "tests/orca_patterns.test.js:11",
+      "count": 1
+    },
+    {
+      "from": "tests/policy_unit.test.js",
+      "to": "src/handlers/background.js",
+      "spec": "../src/handlers/background.js",
+      "resolved": true,
+      "evidence": "tests/policy_unit.test.js:7",
+      "count": 1
+    },
+    {
+      "from": "tests/ps_runner_unit.test.js",
+      "to": "src/utils/ps_runner.js",
+      "spec": "../src/utils/ps_runner.js",
+      "resolved": true,
+      "evidence": "tests/ps_runner_unit.test.js:4",
+      "count": 1
+    },
+    {
+      "from": "tests/sandbox_unit.test.js",
+      "to": "src/handlers/sandbox.js",
+      "spec": "../src/handlers/sandbox.js",
+      "resolved": true,
+      "evidence": "tests/sandbox_unit.test.js:3",
+      "count": 1
+    },
+    {
+      "from": "tests/snapshot_unit.test.js",
+      "to": "src/handlers/snapshot.js",
+      "spec": "../src/handlers/snapshot.js",
+      "resolved": true,
+      "evidence": "tests/snapshot_unit.test.js:3",
+      "count": 1
+    },
+    {
+      "from": "tests/tasks_unit.test.js",
+      "to": "src/handlers/tasks.js",
+      "spec": "../src/handlers/tasks.js",
+      "resolved": true,
+      "evidence": "tests/tasks_unit.test.js:12",
+      "count": 1
+    },
+    {
+      "from": "tests/verify_unit.test.js",
+      "to": "src/handlers/verify.js",
+      "spec": "../src/handlers/verify.js",
+      "resolved": true,
+      "evidence": "tests/verify_unit.test.js:3",
+      "count": 1
+    },
+    {
+      "from": "tests/wgc_live.test.js",
+      "to": "src/handlers/capture.js",
+      "spec": "../src/handlers/capture.js",
+      "resolved": true,
+      "evidence": "tests/wgc_live.test.js:20",
+      "count": 1
+    }
+  ],
+  "externalImports": [
+    {
+      "spec": "node:path",
+      "kind": "node",
+      "evidence": "experiments/opencode_runner.js:9",
+      "count": 23
+    },
+    {
+      "spec": "node:fs",
+      "kind": "node",
+      "evidence": "src/handlers/capture.js:17",
+      "count": 20
+    },
+    {
+      "spec": "node:child_process",
+      "kind": "node",
+      "evidence": "src/handlers/capture.js:15",
+      "count": 14
+    },
+    {
+      "spec": "node:url",
+      "kind": "node",
+      "evidence": "experiments/opencode_runner.js:10",
+      "count": 13
+    },
+    {
+      "spec": "node:assert",
+      "kind": "node",
+      "evidence": "tests/background_unit.test.js:4",
+      "count": 11
+    },
+    {
+      "spec": "node:os",
+      "kind": "node",
+      "evidence": "src/handlers/macros.js:10",
+      "count": 8
+    },
+    {
+      "spec": "node:crypto",
+      "kind": "node",
+      "evidence": "experiments/opencode_runner.js:8",
+      "count": 7
+    },
+    {
+      "spec": "node:assert/strict",
+      "kind": "node",
+      "evidence": "tests/agent_core_unit.test.js:2",
+      "count": 5
+    },
+    {
+      "spec": "@modelcontextprotocol/sdk/client/index.js",
+      "kind": "npm",
+      "evidence": "experiments/opencode_runner.js:5",
+      "count": 4
+    },
+    {
+      "spec": "@modelcontextprotocol/sdk/client/stdio.js",
+      "kind": "npm",
+      "evidence": "experiments/opencode_runner.js:6",
+      "count": 4
+    },
+    {
+      "spec": "node:test",
+      "kind": "node",
+      "evidence": "tests/agent_core_unit.test.js:1",
+      "count": 3
+    },
+    {
+      "spec": "@modelcontextprotocol/sdk/experimental/tasks",
+      "kind": "npm",
+      "evidence": "src/handlers/tasks.js:15",
+      "count": 2
+    },
+    {
+      "spec": "node:perf_hooks",
+      "kind": "node",
+      "evidence": "experiments/opencode_runner.js:7",
+      "count": 1
+    },
+    {
+      "spec": "@modelcontextprotocol/sdk/server/index.js",
+      "kind": "npm",
+      "evidence": "src/index.js:4",
+      "count": 1
+    },
+    {
+      "spec": "@modelcontextprotocol/sdk/server/stdio.js",
+      "kind": "npm",
+      "evidence": "src/index.js:5",
+      "count": 1
+    },
+    {
+      "spec": "@modelcontextprotocol/sdk/types.js",
+      "kind": "npm",
+      "evidence": "src/index.js:6",
+      "count": 1
+    }
+  ],
+  "spawns": [
+    {
+      "api": "exec",
+      "arg": null,
+      "evidence": "src/handlers/barrier.js:152"
+    },
+    {
+      "api": "spawnSync",
+      "arg": "dotnet",
+      "evidence": "src/handlers/capture.js:207"
+    },
+    {
+      "api": "spawnSync",
+      "arg": "utf8",
+      "evidence": "src/handlers/capture.js:277"
+    },
+    {
+      "api": "spawnSync",
+      "arg": ", cursorType || ",
+      "evidence": "src/handlers/indicator.js:164"
+    },
+    {
+      "api": "spawnSync",
+      "arg": "hide",
+      "evidence": "src/handlers/indicator.js:200"
+    },
+    {
+      "api": "spawn",
+      "arg": "true",
+      "evidence": "src/handlers/indicator.js:237"
+    },
+    {
+      "api": "spawn",
+      "arg": "powershell.exe",
+      "evidence": "src/handlers/indicator.js:276"
+    },
+    {
+      "api": "spawnSync",
+      "arg": "launch_sandbox",
+      "evidence": "src/handlers/sandbox.js:19"
+    },
+    {
+      "api": "spawnSync",
+      "arg": "snapshot",
+      "evidence": "src/handlers/snapshot.js:406"
+    },
+    {
+      "api": "spawnSync",
+      "arg": "powershell.exe",
+      "evidence": "src/index.js:174"
+    },
+    {
+      "api": "spawnSync",
+      "arg": "utf8",
+      "evidence": "src/index.js:433"
+    },
+    {
+      "api": "spawnSync",
+      "arg": null,
+      "evidence": "src/index.js:956"
+    },
+    {
+      "api": "spawn",
+      "arg": "pipe",
+      "evidence": "src/index.js:1716"
+    },
+    {
+      "api": "spawnSync",
+      "arg": "utf8",
+      "evidence": "src/index.js:2205"
+    },
+    {
+      "api": "spawnSync",
+      "arg": "file_dialog",
+      "evidence": "src/index.js:2294"
+    },
+    {
+      "api": "execSync",
+      "arg": "utf8",
+      "evidence": "src/index.js:4685"
+    },
+    {
+      "api": "spawn",
+      "arg": "powershell.exe",
+      "evidence": "src/index.js:4688"
+    },
+    {
+      "api": "spawnSync",
+      "arg": "launch",
+      "evidence": "src/index.js:6242"
+    },
+    {
+      "api": "spawnSync",
+      "arg": "focus",
+      "evidence": "src/index.js:6245"
+    },
+    {
+      "api": "spawnSync",
+      "arg": "launch",
+      "evidence": "src/index.js:6268"
+    },
+    {
+      "api": "execSync",
+      "arg": "utf8",
+      "evidence": "src/index.js:6595"
+    },
+    {
+      "api": "spawn",
+      "arg": "powershell.exe",
+      "evidence": "src/index.js:6609"
+    },
+    {
+      "api": "spawn",
+      "arg": "powershell.exe",
+      "evidence": "src/utils/ps_daemon.js:52"
+    },
+    {
+      "api": "spawnSync",
+      "arg": "powershell.exe",
+      "evidence": "src/utils/ps_runner.js:23"
+    },
+    {
+      "api": "spawn",
+      "arg": null,
+      "evidence": "tests/contract_smoke.js:73"
+    },
+    {
+      "api": "spawn",
+      "arg": null,
+      "evidence": "tests/lock_race.test.js:36"
+    },
+    {
+      "api": "spawn",
+      "arg": null,
+      "evidence": "tests/test_indicator_and_screenshot.js:35"
+    },
+    {
+      "api": "spawn",
+      "arg": "🤖 Agente operando",
+      "evidence": "tests/test_indicator_screenshot.js:11"
+    },
+    {
+      "api": "spawn",
+      "arg": "node",
+      "evidence": "tests/test_live_mcp.js:5"
+    },
+    {
+      "api": "spawnSync",
+      "arg": "powershell.exe",
+      "evidence": "tests/test_snap_diag.js:31"
+    },
+    {
+      "api": "spawnSync",
+      "arg": "powershell.exe",
+      "evidence": "tests/wgc_live.test.js:64"
+    },
+    {
+      "api": "spawnSync",
+      "arg": null,
+      "evidence": "tests/wgc_live.test.js:166"
+    }
+  ],
+  "dynamicRefs": [
+    {
+      "kind": "eval|Function",
+      "evidence": "src/utils/browser_cdp.js:138",
+      "snippet": "async eval(expression) {"
+    },
+    {
+      "kind": "eval|Function",
+      "evidence": "src/utils/browser_cdp.js:219",
+      "snippet": "const elements = await this.eval(script);"
+    },
+    {
+      "kind": "eval|Function",
+      "evidence": "src/utils/browser_cdp.js:249",
+      "snippet": "return this.eval(script);"
+    },
+    {
+      "kind": "eval|Function",
+      "evidence": "src/utils/browser_cdp.js:268",
+      "snippet": "return this.eval(script);"
+    },
+    {
+      "kind": "eval|Function",
+      "evidence": "src/utils/browser_cdp.js:336",
+      "snippet": "return this.eval(script);"
+    }
+  ],
+  "envVars": [
+    {
+      "name": "COMPUTER_USE_LOCK_DIR",
+      "count": 10,
+      "firstEvidence": "src/handlers/lock.js:33"
+    },
+    {
+      "name": "COMPUTER_USE_AGENT",
+      "count": 9,
+      "firstEvidence": "src/utils/runtime_env.js:12"
+    },
+    {
+      "name": "COMPUTER_USE_INCIDENTS",
+      "count": 7,
+      "firstEvidence": "src/handlers/incidents.js:32"
+    },
+    {
+      "name": "COMPUTER_USE_INCIDENTS_MAX_BYTES",
+      "count": 7,
+      "firstEvidence": "src/handlers/incidents.js:44"
+    },
+    {
+      "name": "COMPUTER_USE_LOCK",
+      "count": 7,
+      "firstEvidence": "src/handlers/lock.js:41"
+    },
+    {
+      "name": "COMPUTER_USE_TMP_DIR",
+      "count": 5,
+      "firstEvidence": "src/handlers/capture.js:22"
+    },
+    {
+      "name": "COMPUTER_USE_LOCK_TTL_MS",
+      "count": 5,
+      "firstEvidence": "src/handlers/lock.js:45"
+    },
+    {
+      "name": "COMPUTER_USE_LOCK_GUARD_STALE_MS",
+      "count": 5,
+      "firstEvidence": "src/handlers/lock.js:84"
+    },
+    {
+      "name": "COMPUTER_USE_LOCK_GUARD_WAIT_MS",
+      "count": 5,
+      "firstEvidence": "src/handlers/lock.js:89"
+    },
+    {
+      "name": "COMPUTER_USE_INCIDENTS_DIR",
+      "count": 4,
+      "firstEvidence": "src/handlers/incidents.js:36"
+    },
+    {
+      "name": "LOCALAPPDATA",
+      "count": 3,
+      "firstEvidence": "src/handlers/macros.js:137"
+    },
+    {
+      "name": "WINDIR",
+      "count": 2,
+      "firstEvidence": "src/handlers/capture.js:226"
+    },
+    {
+      "name": "COMPUTER_USE_MACROS_DIR",
+      "count": 2,
+      "firstEvidence": "src/handlers/macros.js:136"
+    },
+    {
+      "name": "COMPUTER_USE_BEHAVIOR",
+      "count": 2,
+      "firstEvidence": "src/index.js:4305"
+    },
+    {
+      "name": "OPENCODE_API_KEY",
+      "count": 1,
+      "firstEvidence": "experiments/opencode_runner.js:17"
+    },
+    {
+      "name": "ProgramFiles(x86)",
+      "count": 1,
+      "firstEvidence": "src/handlers/capture.js:235"
+    },
+    {
+      "name": "COMPUTER_USE_WGC_DISABLE",
+      "count": 1,
+      "firstEvidence": "src/handlers/capture.js:327"
+    },
+    {
+      "name": "COMPUTER_USE_WGC_EXE",
+      "count": 1,
+      "firstEvidence": "src/handlers/capture.js:330"
+    },
+    {
+      "name": "USERPROFILE",
+      "count": 1,
+      "firstEvidence": "src/index.js:45"
+    },
+    {
+      "name": "AGENTS_DIR",
+      "count": 1,
+      "firstEvidence": "src/index.js:46"
+    },
+    {
+      "name": "WIKISKILLS_DIR",
+      "count": 1,
+      "firstEvidence": "src/index.js:46"
+    },
+    {
+      "name": "WORKSPACE_ROOT",
+      "count": 1,
+      "firstEvidence": "src/index.js:48"
+    },
+    {
+      "name": "COMPUTER_USE_URL",
+      "count": 1,
+      "firstEvidence": "src/index.js:79"
+    },
+    {
+      "name": "OPENCODE_DESKTOP_URL",
+      "count": 1,
+      "firstEvidence": "src/index.js:79"
+    },
+    {
+      "name": "OPENCODE_DESKTOP_USER",
+      "count": 1,
+      "firstEvidence": "src/index.js:81"
+    },
+    {
+      "name": "OPENCODE_DESKTOP_PASS",
+      "count": 1,
+      "firstEvidence": "src/index.js:82"
+    },
+    {
+      "name": "COMPUTER_USE_MODE",
+      "count": 1,
+      "firstEvidence": "src/index.js:85"
+    },
+    {
+      "name": "COMPUTER_USE_OCR_PYTHON",
+      "count": 1,
+      "firstEvidence": "src/index.js:1715"
+    },
+    {
+      "name": "COMPUTER_USE_PROFILE",
+      "count": 1,
+      "firstEvidence": "src/index.js:4129"
+    },
+    {
+      "name": "COMPUTER_USE_OCR_DEVICE",
+      "count": 1,
+      "firstEvidence": "src/index.js:6507"
+    },
+    {
+      "name": "COMPUTER_USE_DISABLE_DAEMON",
+      "count": 1,
+      "firstEvidence": "src/utils/ps_daemon.js:27"
+    },
+    {
+      "name": "START_AT",
+      "count": 1,
+      "firstEvidence": "tests/lock_race.test.js:21"
+    },
+    {
+      "name": "CU_TEST_WGC",
+      "count": 1,
+      "firstEvidence": "tests/wgc_live.test.js:32"
+    },
+    {
+      "name": "CU_TEST_WGC_KEEP",
+      "count": 1,
+      "firstEvidence": "tests/wgc_live.test.js:207"
+    }
+  ],
+  "hardPaths": [
+    {
+      "value": "C:\\\\Windows",
+      "evidence": "src/handlers/capture.js:250"
+    },
+    {
+      "value": "C:\\\\Program Files (x86)",
+      "evidence": "src/handlers/capture.js:235"
+    },
+    {
+      "value": "G:/Proyectos",
+      "evidence": "src/index.js:48"
+    },
+    {
+      "value": "C:\\\\Program Files\\\\Google\\\\Chrome\\\\Application\\\\chrome.exe",
+      "evidence": "src/index.js:6233"
+    },
+    {
+      "value": "C:\\\\Program Files (x86)\\\\Google\\\\Chrome\\\\Application\\\\chrome.exe",
+      "evidence": "src/index.js:6234"
+    },
+    {
+      "value": "C:\\\\Users\\\\x\\\\AppData\\\\Local",
+      "evidence": "tests/capture_unit.test.js:162"
+    },
+    {
+      "value": "C:\\\\L",
+      "evidence": "tests/capture_unit.test.js:164"
+    },
+    {
+      "value": "D:\\\\cu-cache",
+      "evidence": "tests/capture_unit.test.js:164"
+    }
+  ],
+  "nativeRefs": [
+    {
+      "value": "user32.dll",
+      "evidence": "tests/wgc_live.test.js:50"
+    },
+    {
+      "value": "kernel32.dll",
+      "evidence": "src/index.js:251"
+    },
+    {
+      "value": "gdi32.dll",
+      "evidence": "src/handlers/indicator.js:79"
+    },
+    {
+      "value": ".exe",
+      "evidence": "src/handlers/system_tray.js:349"
+    },
+    {
+      "value": "$($_.ProcessName).exe",
+      "evidence": "native/runtime.ps1:264"
+    },
+    {
+      "value": "combase.dll",
+      "evidence": "native/wgc/Program.cs:79"
+    },
+    {
+      "value": "d3d11.dll",
+      "evidence": "native/wgc/Program.cs:90"
+    },
+    {
+      "value": "windows.graphics.directx.direct3d11.dll",
+      "evidence": "native/wgc/Program.cs:85"
+    },
+    {
+      "value": "shcore.dll",
+      "evidence": "src/index.js:226"
+    },
+    {
+      "value": "ComputerUseWgc.exe",
+      "evidence": "tests/contract_smoke.js:347"
+    },
+    {
+      "value": "ComputerUseWgc.csproj",
+      "evidence": "src/handlers/capture.js:203"
+    },
+    {
+      "value": "csc.exe",
+      "evidence": "src/handlers/capture.js:229"
+    },
+    {
+      "value": "System.Runtime.WindowsRuntime.dll",
+      "evidence": "src/handlers/capture.js:267"
+    },
+    {
+      "value": "System.Runtime.InteropServices.WindowsRuntime.dll",
+      "evidence": "src/handlers/capture.js:268"
+    },
+    {
+      "value": "System.Runtime.dll",
+      "evidence": "src/handlers/capture.js:269"
+    },
+    {
+      "value": "Program.cs",
+      "evidence": "src/handlers/capture.js:275"
+    },
+    {
+      "value": "NativeIndicator.exe",
+      "evidence": "tests/test_indicator_screenshot.js:7"
+    },
+    {
+      "value": "cu_indicator_${Date.now()}.ps1",
+      "evidence": "src/handlers/indicator.js:273"
+    },
+    {
+      "value": "powershell.exe",
+      "evidence": "tests/wgc_live.test.js:64"
+    },
+    {
+      "value": "DesktopBridge.exe",
+      "evidence": "src/index.js:6230"
+    },
+    {
+      "value": "cu_ps_${Date.now()}_${++psScriptCounter}.ps1",
+      "evidence": "src/utils/ps_runner.js:20"
+    },
+    {
+      "value": "cu_last_failed.ps1",
+      "evidence": "src/utils/ps_runner.js:31"
+    },
+    {
+      "value": "dwmapi.dll",
+      "evidence": "tests/wgc_live.test.js:49"
+    },
+    {
+      "value": "./ocr_worker.py",
+      "evidence": "src/index.js:1714"
+    },
+    {
+      "value": "C:\\\\Program Files\\\\Google\\\\Chrome\\\\Application\\\\chrome.exe",
+      "evidence": "src/index.js:6233"
+    },
+    {
+      "value": "C:\\\\Program Files (x86)\\\\Google\\\\Chrome\\\\Application\\\\chrome.exe",
+      "evidence": "src/index.js:6234"
+    },
+    {
+      "value": "runtime.ps1",
+      "evidence": "src/utils/ps_daemon.js:12"
+    },
+    {
+      "value": "notepad.exe",
+      "evidence": "tests/browser_cdp_unit.test.js:15"
+    },
+    {
+      "value": "chrome.exe",
+      "evidence": "tests/lock_unit.test.js:102"
+    },
+    {
+      "value": "classifyWindow: tolera mayúsculas y sufijo .exe",
+      "evidence": "tests/background_unit.test.js:62"
+    },
+    {
+      "value": "Chrome.exe",
+      "evidence": "tests/background_unit.test.js:63"
+    },
+    {
+      "value": "NOTEPAD.EXE",
+      "evidence": "tests/background_unit.test.js:64"
+    },
+    {
+      "value": "msedge.exe",
+      "evidence": "tests/browser_cdp_unit.test.js:14"
+    },
+    {
+      "value": "explorer.exe",
+      "evidence": "tests/browser_cdp_unit.test.js:16"
+    },
+    {
+      "value": "app:Chrome.EXE",
+      "evidence": "tests/lock_unit.test.js:69"
+    },
+    {
+      "value": "app:chrome.exe",
+      "evidence": "tests/lock_unit.test.js:102"
+    },
+    {
+      "value": "app:notepad.exe",
+      "evidence": "tests/lock_unit.test.js:81"
+    },
+    {
+      "value": "KeePass.exe",
+      "evidence": "tests/orca_patterns.test.js:18"
+    },
+    {
+      "value": "tests/test_snap_diag.ps1",
+      "evidence": "tests/test_snap_diag.js:28"
+    }
+  ],
+  "binaries": [
+    {
+      "path": "native/DesktopBridge.exe",
+      "bytes": 21504
+    },
+    {
+      "path": "native/NativeIndicator.exe",
+      "bytes": 12800
+    }
+  ],
+  "tests": [
+    {
+      "path": "tests/agent_core_unit.test.js",
+      "lines": 142
+    },
+    {
+      "path": "tests/background_unit.test.js",
+      "lines": 265
+    },
+    {
+      "path": "tests/barrier_unit.test.js",
+      "lines": 368
+    },
+    {
+      "path": "tests/browser_cdp_unit.test.js",
+      "lines": 22
+    },
+    {
+      "path": "tests/capture_unit.test.js",
+      "lines": 178
+    },
+    {
+      "path": "tests/challenger_1_stress_suite.js",
+      "lines": 369
+    },
+    {
+      "path": "tests/challenger_stress_suite.js",
+      "lines": 549
+    },
+    {
+      "path": "tests/contract_smoke.js",
+      "lines": 628
+    },
+    {
+      "path": "tests/e2e_sota_suite.js",
+      "lines": 165
+    },
+    {
+      "path": "tests/incidents_unit.test.js",
+      "lines": 331
+    },
+    {
+      "path": "tests/indicator_unit.test.js",
+      "lines": 51
+    },
+    {
+      "path": "tests/lock_race.test.js",
+      "lines": 134
+    },
+    {
+      "path": "tests/lock_unit.test.js",
+      "lines": 320
+    },
+    {
+      "path": "tests/macros_unit.test.js",
+      "lines": 515
+    },
+    {
+      "path": "tests/orca_patterns.test.js",
+      "lines": 89
+    },
+    {
+      "path": "tests/policy_unit.test.js",
+      "lines": 192
+    },
+    {
+      "path": "tests/ps_runner_unit.test.js",
+      "lines": 63
+    },
+    {
+      "path": "tests/sandbox_unit.test.js",
+      "lines": 12
+    },
+    {
+      "path": "tests/snapshot_unit.test.js",
+      "lines": 136
+    },
+    {
+      "path": "tests/tasks_unit.test.js",
+      "lines": 241
+    },
+    {
+      "path": "tests/test_indicator_and_screenshot.js",
+      "lines": 116
+    },
+    {
+      "path": "tests/test_indicator_screenshot.js",
+      "lines": 25
+    },
+    {
+      "path": "tests/test_live_mcp.js",
+      "lines": 106
+    },
+    {
+      "path": "tests/test_mcp_diag.js",
+      "lines": 29
+    },
+    {
+      "path": "tests/test_snap_diag.js",
+      "lines": 37
+    },
+    {
+      "path": "tests/verify_unit.test.js",
+      "lines": 134
+    },
+    {
+      "path": "tests/wgc_live.test.js",
+      "lines": 217
+    }
+  ],
+  "suggestedBatchOrder": [
+    "experiments/opencode_runner.js",
+    "native/DesktopBridge.cs",
+    "native/NativeIndicator.cs",
+    "native/runtime.ps1",
+    "native/wgc/ComputerUseWgc.csproj",
+    "native/wgc/Program.cs",
+    "src/index.js",
+    "src/ocr_worker.py",
+    "tests/agent_core_unit.test.js",
+    "tests/background_unit.test.js",
+    "tests/barrier_unit.test.js",
+    "tests/browser_cdp_unit.test.js",
+    "tests/capture_unit.test.js",
+    "tests/challenger_1_stress_suite.js",
+    "tests/challenger_stress_suite.js",
+    "tests/contract_smoke.js",
+    "tests/e2e_sota_suite.js",
+    "tests/incidents_unit.test.js",
+    "tests/indicator_unit.test.js",
+    "tests/lock_race.test.js",
+    "tests/lock_unit.test.js",
+    "tests/macros_unit.test.js",
+    "tests/orca_patterns.test.js",
+    "tests/policy_unit.test.js",
+    "tests/ps_runner_unit.test.js",
+    "tests/sandbox_unit.test.js",
+    "tests/snapshot_unit.test.js",
+    "tests/tasks_unit.test.js",
+    "tests/test_indicator_and_screenshot.js",
+    "tests/test_indicator_screenshot.js",
+    "tests/test_live_mcp.js",
+    "tests/test_mcp_diag.js",
+    "tests/test_snap_diag.js",
+    "tests/verify_unit.test.js",
+    "tests/wgc_live.test.js",
+    "src/handlers/awake.js",
+    "src/utils/browser_profiles.js",
+    "src/handlers/agent_core.js",
+    "src/handlers/barrier.js",
+    "src/utils/browser_cdp.js",
+    "src/handlers/system_tray.js",
+    "src/handlers/toast_action.js",
+    "src/handlers/context_menu.js",
+    "src/handlers/drag_scroll.js",
+    "src/handlers/calibrate_dpi.js",
+    "src/handlers/audio_action.js",
+    "src/handlers/incidents.js",
+    "src/handlers/indicator.js",
+    "src/handlers/lock.js",
+    "src/utils/error_recovery.js",
+    "src/utils/ps_daemon.js",
+    "src/handlers/background.js",
+    "src/handlers/snapshot.js",
+    "src/handlers/tasks.js",
+    "src/handlers/verify.js",
+    "src/handlers/capture.js",
+    "src/handlers/sandbox.js",
+    "src/handlers/macros.js",
+    "src/utils/runtime_env.js",
+    "src/utils/ps_runner.js"
+  ]
+}
