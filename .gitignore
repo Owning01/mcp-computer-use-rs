@@ -4,3 +4,4 @@
 *.log
 *.pdb
 .env
+node_modules/

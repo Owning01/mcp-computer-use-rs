@@ -1,0 +1,34 @@
+{
+  "name": "cu2-basic",
+  "a": {
+    "name": "origin",
+    "cmd": ["node", "G:/Proyectos/MCP/computer-use2/src/index.js"],
+    "cwd": "G:/Proyectos/MCP/computer-use2",
+    "env": { "COMPUTER_USE_PROFILE": "full" }
+  },
+  "b": {
+    "name": "target",
+    "cmd": ["node", "G:/Proyectos/MCP/computer-use2/src/index.js"],
+    "cwd": "G:/Proyectos/MCP/computer-use2",
+    "env": { "COMPUTER_USE_PROFILE": "full" }
+  },
+  "steps": [
+    {
+      "id": "init",
+      "method": "initialize",
+      "params": { "protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": { "name": "judge", "version": "1.0" } },
+      "compare": "drop",
+      "ignoreKeys": ["serverInfo", "instructions"],
+      "timeoutMs": 60000
+    },
+    { "id": "tools", "method": "tools/list", "compare": "volatile", "timeoutMs": 60000 },
+    {
+      "id": "lock",
+      "tool": "computer_lock",
+      "arguments": { "action": "status" },
+      "compare": "drop",
+      "ignoreKeys": ["dir", "pid", "agent"],
+      "timeoutMs": 30000
+    }
+  ]
+}

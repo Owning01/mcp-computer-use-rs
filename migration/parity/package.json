@@ -1,0 +1,9 @@
+{
+  "name": "computer-use2-rs-parity",
+  "private": true,
+  "type": "module",
+  "description": "Harness de paridad F2/F7 (repo-migrate). Tooling del programa; no es parte del binario Rust.",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0"
+  }
+}

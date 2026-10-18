@@ -20,7 +20,7 @@
 
 - **CDP como protocolo** y los perfiles Chrome/Brave del usuario (dependencias externas).
 - **APIs de Windows** y el estado del escritorio (obvio).
-- **PaddleOCR:** se elimina el worker Python; el OCR va a `Windows.Media.Ocr` vía windows-rs (el fallback ya existe en el origen). Si la calidad PaddleOCR resulta imprescindible → ticket aparte, fuera de scope.
+- **PaddleOCR:** decisión diferida a F3 (spike comparativo `Windows.Media.Ocr` vía windows-rs vs PaddleOCR). Hasta esa decisión, el worker Python queda intacto.
 - **Carpetas hermanas** `computer-use` y `computer-use-standalone`: fuera de scope.
 
 ## 4. Orden de magnitud
@@ -54,6 +54,6 @@ Startup del server · latencia por tool (daemon PS ≈ 7 ms) · `tools/list` (12
 
 ## Firma
 
-Humano: ______________________  Fecha: ____________
+Humano: **Octavio — firmado en chat, 2026-10-18**
 
 (v1 propuesto por agente; enmiendas van a `migration/RULEBOOK.md` cuando exista, con firma aparte)
