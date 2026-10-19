@@ -193,6 +193,8 @@ async fn run() -> anyhow::Result<()> {
                             )
                         {
                             native_login_profiles(&msg, &mut stdout).await?;
+                        } else if name == "computer_lock" {
+                            native_lock(&msg, &mut stdout).await?;
                         } else if is_request && child_in.is_none() {
                             let resp = json!({
                                 "jsonrpc": "2.0",
@@ -638,6 +640,19 @@ async fn native_login_profiles(msg: &Value, stdout: &mut tokio::io::Stdout) -> a
         &json!({"ok": true, "count": count, "profiles": profiles}),
     )?;
     let resp = json!({"jsonrpc":"2.0","id":id,"result":{"content":[{"type":"text","text":text}]}});
+    respond_value(stdout, &resp).await
+}
+
+async fn native_lock(msg: &Value, stdout: &mut tokio::io::Stdout) -> anyhow::Result<()> {
+    let args = msg["params"]["arguments"].clone();
+    let id = msg.get("id").cloned().unwrap_or(Value::Null);
+    let (payload, is_error) =
+        tokio::task::spawn_blocking(move || cu_core::lock::handle_tool(&args)).await?;
+    let text = serde_json::to_string(&payload)?;
+    let resp = json!({"jsonrpc":"2.0","id":id,"result":{
+        "content":[{"type":"text","text":text}],
+        "isError":is_error
+    }});
     respond_value(stdout, &resp).await
 }
 

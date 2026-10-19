@@ -103,6 +103,22 @@
       "arguments": { "list_profiles": true },
       "compare": "drop",
       "timeoutMs": 30000
+    },
+    {
+      "id": "lock_force_gate",
+      "tool": "computer_lock",
+      "arguments": { "action": "force", "scope": "desktop" },
+      "compare": "drop",
+      "ignoreKeys": ["dir", "pid", "agent", "id", "label", "startedAt", "refreshedAt", "expireAt", "expiresAt", "ttl", "ttl_ms", "age_ms", "expires_in_ms"],
+      "timeoutMs": 30000
+    },
+    {
+      "id": "lock_release",
+      "tool": "computer_lock",
+      "arguments": { "action": "release" },
+      "compare": "drop",
+      "ignoreKeys": ["dir", "pid", "agent", "id", "label", "startedAt", "refreshedAt", "expireAt", "expiresAt", "ttl", "ttl_ms", "age_ms", "expires_in_ms"],
+      "timeoutMs": 30000
     }
   ]
 }

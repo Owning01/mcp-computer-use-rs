@@ -5,9 +5,9 @@ MCP de control de escritorio Windows (68 tools; 12 en perfil agent). Reemplazo R
 `G:\Proyectos\MCP\computer-use2` (Node.js ESM + PowerShell 5.1 + C# net9 + Python). Programa repo-migrate (F0→F8).
 
 ## Estado
-- F0–F5 COMPLETOS. F6 en curso: **puente JSON-RPC crudo** con 8 de 68 tools nativos; el resto se proxea al hijo Node (cero regresión).
+- F0–F5 COMPLETOS. F6 en curso: **puente JSON-RPC crudo** con 10 de 68 tools nativos; el resto se proxea al hijo Node (cero regresión).
 - Tools nativos: `computer_list_windows`, `computer_screenshot`, `computer_zoom`, `computer_screen_info`, `computer_awake`,
-  `computer_active_window`, `computer_clipboard`, `computer_incidents`.
+  `computer_active_window`, `computer_clipboard`, `computer_incidents`, `computer_login` (list_profiles), `computer_lock`.
 - Sin cutover: `opencode.json` sigue apuntando al origen Node. El binario Rust se valida con el harness de paridad (juez + smoke congelado).
 - Divergencias documentadas y aceptadas: WGC real pendiente (`wgc_unavailable` controlado); `cursor`/`annotate_marks` TODO(port); PaddleOCR sidecar.
 

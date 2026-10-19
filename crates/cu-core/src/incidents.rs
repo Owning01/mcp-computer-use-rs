@@ -36,7 +36,7 @@ pub fn incidents_enabled() -> bool {
     }
 }
 
-fn local_app_data() -> PathBuf {
+pub(crate) fn local_app_data() -> PathBuf {
     if let Ok(v) = std::env::var("LOCALAPPDATA") {
         if !v.trim().is_empty() {
             return PathBuf::from(v);
@@ -77,7 +77,7 @@ fn max_bytes() -> u64 {
     DEFAULT_MAX_BYTES
 }
 
-fn agent_label() -> String {
+pub(crate) fn agent_label() -> String {
     match std::env::var("COMPUTER_USE_AGENT") {
         Ok(v) => {
             let label = v.trim().to_string();
@@ -142,7 +142,7 @@ fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
     era * 146_097 + doe - 719_468
 }
 
-fn iso_from_ms(ms: i64) -> String {
+pub(crate) fn iso_from_ms(ms: i64) -> String {
     let secs = ms.div_euclid(1000);
     let millis = ms.rem_euclid(1000);
     let days = secs.div_euclid(86_400);
