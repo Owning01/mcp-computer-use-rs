@@ -111,7 +111,7 @@ fn clamp_limit(value: Option<&Value>) -> u64 {
     }
 }
 
-fn now_ms() -> u128 {
+pub(crate) fn now_ms() -> u128 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis())
@@ -160,7 +160,7 @@ pub(crate) fn iso_from_ms(ms: i64) -> String {
     )
 }
 
-fn iso_now() -> String {
+pub(crate) fn iso_now() -> String {
     iso_from_ms(now_ms() as i64)
 }
 

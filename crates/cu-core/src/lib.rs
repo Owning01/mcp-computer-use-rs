@@ -4,5 +4,6 @@ pub mod epoch;
 pub mod incidents;
 pub mod js;
 pub mod lock;
+pub mod macros;
 pub mod out;
 pub mod profiles;

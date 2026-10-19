@@ -9,20 +9,12 @@
 // Reglas: migration/RULEBOOK.md (ver enmienda: puente crudo por paridad byte-exacta).
 use serde_json::{json, Value};
 use std::process::Stdio;
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::mpsc;
 
 static SHOT_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-// Mientras el hijo Node graba una macro (computer_macro_record start..stop), el puente no
-// intercepta tools de cluster: la llamada viaja al hijo para quedar registrada. El estado se
-// espeja observando las respuestas de computer_macro_record que cruzan el proxy.
-static MACRO_RECORDING: AtomicBool = AtomicBool::new(false);
-static MACRO_PENDING: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
 
 const ORIGIN_NODE: &str = "node";
 const ORIGIN_SCRIPT: &str = "G:/Proyectos/MCP/computer-use2/src/index.js";
@@ -118,21 +110,6 @@ async fn run() -> anyhow::Result<()> {
                     if v.get("id").and_then(Value::as_i64).is_some_and(|id| id < 0) {
                         continue;
                     }
-                    if let Some(idv) = v.get("id") {
-                        if let Some(action) = macro_pending_take(&idv.to_string()) {
-                            let text = v
-                                .pointer("/result/content/0/text")
-                                .and_then(Value::as_str)
-                                .unwrap_or("");
-                            let payload: Value = serde_json::from_str(text).unwrap_or(Value::Null);
-                            let ok = payload.get("ok") == Some(&Value::Bool(true));
-                            if action == "start" && ok {
-                                MACRO_RECORDING.store(true, Ordering::SeqCst);
-                            } else if action == "stop" {
-                                MACRO_RECORDING.store(false, Ordering::SeqCst);
-                            }
-                        }
-                    }
                 }
                 if tx.send((Src::Child, l)).await.is_err() {
                     break;
@@ -193,6 +170,25 @@ async fn run() -> anyhow::Result<()> {
                     }
                     "tools/call" => {
                         let name = msg["params"]["name"].as_str().unwrap_or("");
+                        // Grabación de macros: registra TODO tool call (salvo los macro_* y los
+                        // bootstrap internos de id negativo) con args saneados, igual que el
+                        // dispatch del origen. El replay lo ejecuta el hijo sobre el mismo archivo.
+                        if !name.is_empty()
+                            && !name.starts_with("computer_macro_")
+                            && msg
+                                .get("id")
+                                .and_then(Value::as_i64)
+                                .map(|id| id >= 0)
+                                .unwrap_or(true)
+                            && cu_core::macros::is_recording()
+                        {
+                            let args_v = msg
+                                .get("params")
+                                .and_then(|p| p.get("arguments"))
+                                .cloned()
+                                .unwrap_or_else(|| json!({}));
+                            cu_core::macros::note_step(name, &args_v);
+                        }
                         if name == "computer_list_windows" {
                             native_list_windows(&msg, &mut stdout).await?;
                         } else if name == "computer_screenshot" {
@@ -217,7 +213,12 @@ async fn run() -> anyhow::Result<()> {
                             native_login_profiles(&msg, &mut stdout).await?;
                         } else if name == "computer_lock" {
                             native_lock(&msg, &mut stdout).await?;
-                        } else if !macro_recording() && {
+                        } else if name == "computer_macro_record"
+                            || name == "computer_macro_list"
+                            || name == "computer_macro_delete"
+                        {
+                            native_macros(&msg, &mut stdout).await?;
+                        } else if {
                             let null_args = Value::Null;
                             let cargs = msg
                                 .get("params")
@@ -238,18 +239,6 @@ async fn run() -> anyhow::Result<()> {
                             });
                             respond_value(&mut stdout, &resp).await?;
                         } else {
-                            if name == "computer_macro_record" {
-                                let action = msg
-                                    .pointer("/params/arguments/action")
-                                    .and_then(Value::as_str)
-                                    .unwrap_or("");
-                                let id_key = msg
-                                    .get("id")
-                                    .cloned()
-                                    .unwrap_or(Value::Null)
-                                    .to_string();
-                                macro_pending_insert(&id_key, action);
-                            }
                             forward(&mut child_in, &line).await?;
                         }
                     }
@@ -705,25 +694,6 @@ async fn native_lock(msg: &Value, stdout: &mut tokio::io::Stdout) -> anyhow::Res
     respond_value(stdout, &resp).await
 }
 
-fn macro_recording() -> bool {
-    MACRO_RECORDING.load(Ordering::SeqCst)
-}
-
-fn macro_pending_insert(id_key: &str, action: &str) {
-    if let Ok(mut g) = MACRO_PENDING.lock() {
-        g.get_or_insert_with(HashMap::new)
-            .insert(id_key.to_string(), action.to_string());
-    }
-}
-
-fn macro_pending_take(id_key: &str) -> Option<String> {
-    MACRO_PENDING
-        .lock()
-        .ok()?
-        .get_or_insert_with(HashMap::new)
-        .remove(id_key)
-}
-
 // Convierte un ToolOut de error en el "result" que consume cu_core::incidents.
 fn cluster_error_result(out: &cu_core::out::ToolOut) -> Option<Value> {
     let payload = match out {
@@ -817,9 +787,38 @@ async fn native_cluster(
     respond_value(stdout, &resp).await
 }
 
+async fn native_macros(msg: &Value, stdout: &mut tokio::io::Stdout) -> anyhow::Result<()> {
+    let args = msg["params"]["arguments"].clone();
+    let id = msg.get("id").cloned().unwrap_or(Value::Null);
+    let tool = msg["params"]["name"].as_str().unwrap_or("").to_string();
+    let (payload, is_error, structured) = tokio::task::spawn_blocking(move || {
+        match tool.as_str() {
+            "computer_macro_record" => cu_core::macros::handle_record(&args),
+            "computer_macro_list" => cu_core::macros::handle_list(),
+            "computer_macro_delete" => cu_core::macros::handle_delete(&args),
+            _ => (
+                json!({"ok": false, "error": "execution_failed", "message": "unknown macro tool"}),
+                true,
+                None,
+            ),
+        }
+    })
+    .await?;
+    let text = serde_json::to_string(&payload)?;
+    let mut result = json!({"content": [{"type": "text", "text": text}]});
+    match structured {
+        Some(sc) => {
+            result["structuredContent"] = sc;
+        }
+        None => {
+            result["isError"] = json!(is_error);
+        }
+    }
+    let resp = json!({"jsonrpc":"2.0","id":id,"result":result});
+    respond_value(stdout, &resp).await
+}
+
 async fn bootstrap_child(child_in: &mut Option<ChildStdin>) -> anyhow::Result<()> {
-    // Hijo (re)arrancado: su estado de grabación de macros vuelve a cero.
-    MACRO_RECORDING.store(false, Ordering::SeqCst);
     // Inicializa el child Node con id interno negativo: sus respuestas no se reenvian al cliente.
     let Some(ci) = child_in.as_mut() else {
         return Ok(());
