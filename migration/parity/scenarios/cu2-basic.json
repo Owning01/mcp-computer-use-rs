@@ -29,6 +29,14 @@
       "compare": "drop",
       "ignoreKeys": ["dir", "pid", "agent", "id", "label", "startedAt", "refreshedAt", "expireAt", "expiresAt", "ttl", "ttl_ms", "age_ms", "expires_in_ms"],
       "timeoutMs": 30000
+    },
+    {
+      "id": "shot",
+      "tool": "computer_screenshot",
+      "arguments": { "x": 0, "y": 0, "w": 400, "h": 300, "width": 200, "format": "jpeg" },
+      "compare": "drop",
+      "ignoreKeys": ["etag", "epoch"],
+      "timeoutMs": 60000
     }
   ]
 }

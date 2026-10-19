@@ -1,6 +1,6 @@
-// cu-native — primitivas Win32 nativas (F4: list_windows).
-// Reemplaza la implementacion PowerShell/C# del origen (index.js NATIVE_WIN32_HEADER:
-// ListWindowsJson). Reglas: migration/RULEBOOK.md.
+// cu-native — primitivas Win32 nativas (F4/F5: list_windows, capture).
+// Reemplaza las implementaciones PowerShell/C# del origen. Reglas: migration/RULEBOOK.md.
+pub mod capture;
 use serde::Serialize;
 use windows::core::BOOL;
 use windows::Win32::Foundation::{HWND, LPARAM, RECT};

@@ -9,9 +9,13 @@
 // Reglas: migration/RULEBOOK.md (ver enmienda: puente crudo por paridad byte-exacta).
 use serde_json::{json, Value};
 use std::process::Stdio;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::mpsc;
+
+static EPOCH: AtomicU64 = AtomicU64::new(0);
+static SHOT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 const ORIGIN_NODE: &str = "node";
 const ORIGIN_SCRIPT: &str = "G:/Proyectos/MCP/computer-use2/src/index.js";
@@ -169,6 +173,8 @@ async fn run() -> anyhow::Result<()> {
                         let name = msg["params"]["name"].as_str().unwrap_or("");
                         if name == "computer_list_windows" {
                             native_list_windows(&msg, &mut stdout).await?;
+                        } else if name == "computer_screenshot" {
+                            native_screenshot(&msg, &mut stdout).await?;
                         } else if is_request && child_in.is_none() {
                             let resp = json!({
                                 "jsonrpc": "2.0",
@@ -201,6 +207,166 @@ async fn run() -> anyhow::Result<()> {
         let _ = c.kill().await;
     }
     Ok(())
+}
+
+fn ji(v: Option<&Value>, min: i64, max: i64, def: i64) -> i64 {
+    let n = match v {
+        Some(Value::Number(n)) => n.as_f64(),
+        Some(Value::String(s)) => s.trim().parse::<f64>().ok(),
+        _ => None,
+    };
+    match n {
+        Some(f) if f.is_finite() => (f.trunc() as i64).clamp(min, max),
+        _ => def,
+    }
+}
+
+fn md5_hex(bytes: &[u8]) -> String {
+    use md5::{Digest, Md5};
+    let d = Md5::digest(bytes);
+    d.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn now_ms() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0)
+}
+
+fn save_shot(bytes: &[u8], is_jpeg: bool) -> anyhow::Result<(String, String, String)> {
+    let base = std::env::var("COMPUTER_USE_TMP_DIR")
+        .unwrap_or_else(|_| "G:/Proyectos/MCP/computer-use2/.tmp".into());
+    let dir = std::path::Path::new(&base).join("shots");
+    std::fs::create_dir_all(&dir)?;
+    let ext = if is_jpeg { "jpg" } else { "png" };
+    let name = format!(
+        "shot_{}_{}.{}",
+        now_ms(),
+        SHOT_COUNTER.fetch_add(1, Ordering::SeqCst) + 1,
+        ext
+    );
+    let path = dir.join(&name);
+    std::fs::write(&path, bytes)?;
+    let path_str = path.to_string_lossy().replace('/', "\\");
+    let uri = format!("file:///{}", path.to_string_lossy().replace('\\', "/"));
+    Ok((path_str, uri, name))
+}
+
+async fn native_screenshot(msg: &Value, stdout: &mut tokio::io::Stdout) -> anyhow::Result<()> {
+    let args = msg["params"]["arguments"].clone();
+    let shot_args = cu_native::capture::ShotArgs {
+        width: ji(args.get("width"), 0, 100000, 0),
+        format: args
+            .get("format")
+            .and_then(Value::as_str)
+            .unwrap_or("jpeg")
+            .to_string(),
+        quality: ji(args.get("quality"), 10, 95, 75),
+        hwnd: ji(args.get("hwnd"), 0, 281474976710655, 0),
+        x: ji(args.get("x"), -1000000, 1000000, 0),
+        y: ji(args.get("y"), -1000000, 1000000, 0),
+        w: ji(args.get("w"), 0, 1000000, 0),
+        h: ji(args.get("h"), 0, 1000000, 0),
+        screen: ji(args.get("screen"), 0, 64, 0),
+        capture: args
+            .get("capture")
+            .and_then(Value::as_str)
+            .unwrap_or("auto")
+            .to_string(),
+    };
+    let etag_req = args.get("etag").and_then(Value::as_str).map(str::to_string);
+    let link = args.get("link").and_then(Value::as_bool).unwrap_or(false);
+    let id = msg.get("id").cloned().unwrap_or(Value::Null);
+
+    let out = match tokio::task::spawn_blocking(move || cu_native::capture::screenshot(&shot_args))
+        .await
+    {
+        Ok(o) => o,
+        Err(e) => {
+            let text = serde_json::to_string(&json!({
+                "ok": false, "error": "join_error", "message": e.to_string(), "capture_method": "unknown"
+            }))?;
+            let resp = json!({"jsonrpc":"2.0","id":id,"result":{"content":[{"type":"text","text":text}],"isError":true}});
+            return respond_value(stdout, &resp).await;
+        }
+    };
+
+    match out {
+        cu_native::capture::ShotOut::Err { error, message, capture_method } => {
+            let text = serde_json::to_string(
+                &json!({"ok": false, "error": error, "message": message, "capture_method": capture_method}),
+            )?;
+            let resp = json!({"jsonrpc":"2.0","id":id,"result":{"content":[{"type":"text","text":text}],"isError":true}});
+            respond_value(stdout, &resp).await
+        }
+        cu_native::capture::ShotOut::Ok(ok) => {
+            let epoch = EPOCH.fetch_add(1, Ordering::SeqCst) + 1;
+            let etag = md5_hex(&ok.bytes);
+            if etag_req.as_deref() == Some(etag.as_str()) {
+                let text = serde_json::to_string(&json!({
+                    "unchanged": true,
+                    "etag": etag,
+                    "epoch": epoch,
+                    "width": ok.meta.get("width").cloned().unwrap_or(Value::Null),
+                    "height": ok.meta.get("height").cloned().unwrap_or(Value::Null)
+                }))?;
+                let resp = json!({"jsonrpc":"2.0","id":id,"result":{"content":[{"type":"text","text":text}]}});
+                return respond_value(stdout, &resp).await;
+            }
+
+            // Meta con el orden exacto del wrapper del origen (index.js:4521-4539).
+            let mut meta = serde_json::Map::new();
+            for k in ["width", "height", "original_width", "original_height", "scale_factor", "format"] {
+                if let Some(v) = ok.meta.get(k) {
+                    meta.insert(k.to_string(), v.clone());
+                }
+            }
+            meta.insert("etag".into(), json!(etag));
+            meta.insert("epoch".into(), json!(epoch));
+            meta.insert("unchanged".into(), json!(false));
+            for k in [
+                "screen_x",
+                "screen_y",
+                "virtual_screen",
+                "capture_method",
+                "capture_used",
+                "printwindow_flag",
+                "capture_fallback_from",
+                "capture_fallback_reason",
+            ] {
+                if let Some(v) = ok.meta.get(k) {
+                    meta.insert(k.to_string(), v.clone());
+                }
+            }
+            let mime = if ok.is_jpeg { "image/jpeg" } else { "image/png" };
+
+            if link {
+                let (path_str, uri, name) = save_shot(&ok.bytes, ok.is_jpeg)?;
+                meta.insert("path".into(), json!(path_str));
+                meta.insert("mime".into(), json!(mime));
+                let n = ok.bytes.len() as i64;
+                meta.insert("bytes".into(), json!((n + 2) / 3 * 3));
+                let text = serde_json::to_string(&Value::Object(meta))?;
+                let resp = json!({"jsonrpc":"2.0","id":id,"result":{"content":[
+                    {"type":"text","text":text},
+                    {"type":"resource_link","uri":uri,"name":name,"mimeType":mime}
+                ]}});
+                return respond_value(stdout, &resp).await;
+            }
+
+            let b64 = {
+                use base64::Engine;
+                base64::engine::general_purpose::STANDARD.encode(&ok.bytes)
+            };
+            let text = serde_json::to_string(&Value::Object(meta))?;
+            let resp = json!({"jsonrpc":"2.0","id":id,"result":{"content":[
+                {"type":"image","data":b64,"mimeType":mime},
+                {"type":"text","text":text}
+            ]}});
+            respond_value(stdout, &resp).await
+        }
+    }
 }
 
 async fn bootstrap_child(child_in: &mut Option<ChildStdin>) -> anyhow::Result<()> {
