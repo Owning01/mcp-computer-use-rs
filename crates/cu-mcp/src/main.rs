@@ -181,6 +181,10 @@ async fn run() -> anyhow::Result<()> {
                             native_screen_info(&msg, &mut stdout).await?;
                         } else if name == "computer_awake" {
                             native_awake(&msg, &mut stdout).await?;
+                        } else if name == "computer_active_window" {
+                            native_active_window(&msg, &mut stdout).await?;
+                        } else if name == "computer_clipboard" {
+                            native_clipboard(&msg, &mut stdout).await?;
                         } else if is_request && child_in.is_none() {
                             let resp = json!({
                                 "jsonrpc": "2.0",
@@ -552,6 +556,55 @@ async fn native_zoom(msg: &Value, stdout: &mut tokio::io::Stdout) -> anyhow::Res
                 {"type":"image","data":b64,"mimeType":mime},
                 {"type":"text","text":text}
             ]}});
+            respond_value(stdout, &resp).await
+        }
+    }
+}
+
+async fn native_active_window(msg: &Value, stdout: &mut tokio::io::Stdout) -> anyhow::Result<()> {
+    let v = tokio::task::spawn_blocking(cu_native::system::active_window).await?;
+    let text = serde_json::to_string(&v)?;
+    let resp = json!({"jsonrpc":"2.0","id": msg.get("id").cloned().unwrap_or(Value::Null),
+        "result":{"content":[{"type":"text","text":text}]}});
+    respond_value(stdout, &resp).await
+}
+
+async fn native_clipboard(msg: &Value, stdout: &mut tokio::io::Stdout) -> anyhow::Result<()> {
+    let args = msg["params"]["arguments"].clone();
+    let id = msg.get("id").cloned().unwrap_or(Value::Null);
+    let action = args.get("action").and_then(Value::as_str).unwrap_or("");
+
+    if action == "get" {
+        // El origen devuelve el texto con trim() del pipeline PowerShell.
+        let r = tokio::task::spawn_blocking(cu_native::system::clipboard_get).await?;
+        return match r {
+            Ok(t) => {
+                let text = t.trim().to_string();
+                let resp = json!({"jsonrpc":"2.0","id":id,"result":{"content":[{"type":"text","text":text}]}});
+                respond_value(stdout, &resp).await
+            }
+            Err(e) => {
+                let text = format!("ERROR: {e}");
+                let resp = json!({"jsonrpc":"2.0","id":id,"result":{"content":[{"type":"text","text":text}],"isError":true}});
+                respond_value(stdout, &resp).await
+            }
+        };
+    }
+
+    let text_to_set = args.get("text").and_then(Value::as_str).unwrap_or("").to_string();
+    let r = tokio::task::spawn_blocking(move || cu_native::system::clipboard_set(&text_to_set)).await?;
+    match r {
+        Ok(()) => {
+            let epoch = EPOCH.fetch_add(1, Ordering::SeqCst) + 1;
+            let text = serde_json::to_string(
+                &json!({ "ok": true, "action": "clipboard_set", "epoch": epoch }),
+            )?;
+            let resp = json!({"jsonrpc":"2.0","id":id,"result":{"content":[{"type":"text","text":text}]}});
+            respond_value(stdout, &resp).await
+        }
+        Err(e) => {
+            let text = format!("ERROR: {e}");
+            let resp = json!({"jsonrpc":"2.0","id":id,"result":{"content":[{"type":"text","text":text}],"isError":true}});
             respond_value(stdout, &resp).await
         }
     }

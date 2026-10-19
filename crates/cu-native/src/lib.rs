@@ -2,6 +2,7 @@
 // Reemplaza las implementaciones PowerShell/C# del origen. Reglas: migration/RULEBOOK.md.
 pub mod capture;
 pub mod screen;
+pub mod system;
 use serde::Serialize;
 
 /// SetThreadExecutionState (computer_awake). Devuelve false si Win32 falla.

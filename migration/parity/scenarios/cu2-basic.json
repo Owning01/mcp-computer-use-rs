@@ -53,6 +53,28 @@
       "compare": "drop",
       "ignoreKeys": ["cursor"],
       "timeoutMs": 30000
+    },
+    {
+      "id": "awin",
+      "tool": "computer_active_window",
+      "arguments": {},
+      "compare": "drop",
+      "timeoutMs": 30000
+    },
+    {
+      "id": "clipset",
+      "tool": "computer_clipboard",
+      "arguments": { "action": "set", "text": "__cu_probe__" },
+      "compare": "drop",
+      "ignoreKeys": ["epoch"],
+      "timeoutMs": 30000
+    },
+    {
+      "id": "clipget",
+      "tool": "computer_clipboard",
+      "arguments": { "action": "get" },
+      "compare": "drop",
+      "timeoutMs": 30000
     }
   ]
 }
