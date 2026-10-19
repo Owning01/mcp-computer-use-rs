@@ -5,7 +5,7 @@ use cu_core::out::ToolOut;
 use serde_json::{json, Value};
 use std::thread;
 use std::time::Duration;
-use windows::Win32::Foundation::{HWND, LPARAM};
+use windows::Win32::Foundation::{HWND, LPARAM, POINT};
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::Win32::System::Threading::AttachThreadInput;
@@ -255,12 +255,13 @@ pub fn handles(name: &str) -> bool {
             | "computer_paste"
             | "computer_bulk_input"
             | "computer_drag_scroll"
+            | "computer_click"
+            | "computer_double_click"
+            | "computer_human_click"
+            | "computer_drag"
+            | "computer_scroll"
+            | "computer_type"
     )
-}
-
-// accepts: subconjunto de args servible nativo (default true; el puente consulta esto).
-pub fn accepts(_name: &str, _args: &Value) -> bool {
-    true
 }
 
 pub fn handle_call(name: &str, args: &Value) -> ToolOut {
@@ -272,6 +273,12 @@ pub fn handle_call(name: &str, args: &Value) -> ToolOut {
         "computer_paste" => handle_paste(args),
         "computer_bulk_input" => handle_bulk_input(args),
         "computer_drag_scroll" => handle_drag_scroll(args),
+        "computer_click" => handle_click(args, false),
+        "computer_double_click" => handle_click(args, true),
+        "computer_human_click" => handle_human_click(args),
+        "computer_drag" => handle_drag(args),
+        "computer_scroll" => handle_scroll(args),
+        "computer_type" => handle_type(args),
         _ => ToolOut::Json(json!({"ok": false, "error": "not_implemented"}), true),
     }));
     match result {
@@ -596,6 +603,440 @@ fn handle_drag_scroll(args: &Value) -> ToolOut {
     ToolOut::Json(Value::Object(res), false)
 }
 
+fn arg_f64(args: &Value, key: &str) -> Option<f64> {
+    match args.get(key) {
+        Some(Value::Number(n)) => n.as_f64(),
+        Some(Value::String(s)) => s.trim().parse::<f64>().ok(),
+        _ => None,
+    }
+}
+
+fn has_arg(args: &Value, key: &str) -> bool {
+    args.get(key).map(|v| !v.is_null()).unwrap_or(false)
+}
+
+pub fn accepts(name: &str, args: &Value) -> bool {
+    match name {
+        "computer_hotkey" => args.get("combo").map(|v| !cu_core::js::js_string_of(v).trim().is_empty()).unwrap_or(false),
+        "computer_key" => true,
+        "computer_move" => true,
+        "computer_copy" => true,
+        "computer_paste" => true,
+        "computer_bulk_input" => {
+            let rows_ok = match args.get("rows") {
+                Some(Value::Array(a)) => !a.is_empty(),
+                _ => false,
+            };
+            if !rows_ok { return false; }
+            // target_text sin coords resueltas => proxy (no lo resolvemos nativo).
+            if has_arg(args, "target_text")
+                && !(arg_f64(args, "target_x").is_some() && arg_f64(args, "target_y").is_some())
+            {
+                return false;
+            }
+            true
+        }
+        "computer_drag_scroll" => true,
+        "computer_click" | "computer_double_click" => {
+            if arg_f64(args, "x").is_none() || arg_f64(args, "y").is_none() { return false; }
+            // subsistemas externos no soportados
+            if has_arg(args, "id") || has_arg(args, "ref") || has_arg(args, "name")
+                || has_arg(args, "automation_id") || has_arg(args, "target_text")
+            {
+                return false;
+            }
+            // headless no soportado
+            if let Some(b) = args.get("behavior").and_then(Value::as_str) {
+                if b == "headless" { return false; }
+                if !["auto", "foreground", "humanized"].contains(&b) { return false; }
+            }
+            true
+        }
+        "computer_human_click" => {
+            if arg_f64(args, "x").is_none() || arg_f64(args, "y").is_none() { return false; }
+            if has_arg(args, "id") { return false; }
+            true
+        }
+        "computer_drag" => {
+            if arg_f64(args, "fromX").is_none() || arg_f64(args, "fromY").is_none()
+                || arg_f64(args, "toX").is_none() || arg_f64(args, "toY").is_none()
+            {
+                return false;
+            }
+            if let Some(b) = args.get("behavior").and_then(Value::as_str) {
+                if b == "headless" { return false; }
+                if !["auto", "foreground", "humanized"].contains(&b) { return false; }
+            }
+            true
+        }
+        "computer_scroll" => {
+            if let Some(b) = args.get("behavior").and_then(Value::as_str) {
+                if b == "headless" { return false; }
+                if !["auto", "foreground", "humanized"].contains(&b) { return false; }
+            }
+            true
+        }
+        "computer_type" => {
+            let text_ok = args.get("text").map(|v| !cu_core::js::js_string_of(v).is_empty()).unwrap_or(false)
+                || args.get("secret_b64").and_then(Value::as_str).map(|s| !s.is_empty()).unwrap_or(false);
+            if !text_ok { return false; }
+            if has_arg(args, "id") || has_arg(args, "ref") || has_arg(args, "name")
+                || has_arg(args, "automation_id")
+            {
+                return false;
+            }
+            if let Some(b) = args.get("behavior").and_then(Value::as_str) {
+                if b == "headless" { return false; }
+                if !["auto", "foreground", "humanized"].contains(&b) { return false; }
+            }
+            true
+        }
+        "computer_fill_form" | "computer_scroll_to_text" => false,
+        _ => false,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// RNG simple (no depende de crate externo).
+// ---------------------------------------------------------------------------
+struct SimpleRng { state: u64 }
+impl SimpleRng {
+    fn new(seed: u64) -> Self { Self { state: if seed == 0 { 1 } else { seed } } }
+    fn next(&mut self) -> u64 {
+        self.state = self.state.wrapping_mul(6364136223846793005).wrapping_add(1);
+        self.state
+    }
+    fn range(&mut self, lo: i32, hi: i32) -> i32 {
+        if hi <= lo { return lo; }
+        lo + (self.next() % (hi - lo + 1) as u64) as i32
+    }
+}
+
+fn button_flags(button: &str) -> (MOUSE_EVENT_FLAGS, MOUSE_EVENT_FLAGS) {
+    if button == "right" { (MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP) }
+    else if button == "middle" { (MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP) }
+    else { (MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP) }
+}
+
+fn send_unicode_char(ch: char, keyup: bool) {
+    unsafe {
+        let mut flags = KEYEVENTF_UNICODE;
+        if keyup { flags = flags | KEYEVENTF_KEYUP; }
+        let inp = INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: VIRTUAL_KEY(0),
+                    wScan: ch as u16,
+                    dwFlags: flags,
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
+            },
+        };
+        let _ = SendInput(&[inp], std::mem::size_of::<INPUT>() as i32);
+    }
+}
+
+fn native_human_click(x: i32, y: i32, button: &str, double: bool) -> Value {
+    let mut pt = POINT::default();
+    unsafe { let _ = GetCursorPos(&mut pt); }
+    let start_x = pt.x;
+    let start_y = pt.y;
+    let dist = ((x - start_x) as f64).hypot((y - start_y) as f64);
+    let steps = (dist / 35.0).max(10.0).min(35.0) as i32;
+    let steps = steps.max(10);
+    let mut rng = SimpleRng::new((start_x as u64).wrapping_mul(31).wrapping_add(start_y as u64));
+    let dev = (dist * 0.18).min(100.0) as i32;
+    let dev = dev.max(0);
+    let ctrl1x = start_x + ((x - start_x) as f64 * 0.3) as i32 + rng.range(-dev, dev);
+    let ctrl1y = start_y + ((y - start_y) as f64 * 0.3) as i32 + rng.range(-dev, dev);
+    let ctrl2x = start_x + ((x - start_x) as f64 * 0.7) as i32 + rng.range(-dev, dev);
+    let ctrl2y = start_y + ((y - start_y) as f64 * 0.7) as i32 + rng.range(-dev, dev);
+
+    for i in 1..=steps {
+        let t = i as f64 / steps as f64;
+        let u = 1.0 - t;
+        let tt = t * t;
+        let uu = u * u;
+        let uuu = uu * u;
+        let ttt = tt * t;
+        let bx = (uuu * start_x as f64 + 3.0 * uu * t * ctrl1x as f64
+            + 3.0 * u * tt * ctrl2x as f64 + ttt * x as f64) as i32;
+        let by = (uuu * start_y as f64 + 3.0 * uu * t * ctrl1y as f64
+            + 3.0 * u * tt * ctrl2y as f64 + ttt * y as f64) as i32;
+        unsafe { let _ = SetCursorPos(bx, by); }
+        thread::sleep(Duration::from_millis(rng.range(5, 14) as u64));
+    }
+    unsafe { let _ = SetCursorPos(x, y); }
+    thread::sleep(Duration::from_millis(rng.range(30, 60) as u64));
+
+    let (down, up) = button_flags(button);
+    unsafe {
+        mouse_event(down, 0, 0, 0, 0);
+    }
+    thread::sleep(Duration::from_millis(rng.range(65, 120) as u64));
+    unsafe {
+        mouse_event(up, 0, 0, 0, 0);
+    }
+    if double {
+        thread::sleep(Duration::from_millis(rng.range(80, 130) as u64));
+        unsafe { mouse_event(down, 0, 0, 0, 0); }
+        thread::sleep(Duration::from_millis(rng.range(50, 95) as u64));
+        unsafe { mouse_event(up, 0, 0, 0, 0); }
+    }
+    json!({"ok": true, "x": x, "y": y})
+}
+
+fn native_human_drag(args: &Value) {
+    let from_x = int_arg(args.get("fromX"), -100000, 100000, 0) as i32;
+    let from_y = int_arg(args.get("fromY"), -100000, 100000, 0) as i32;
+    let to_x = int_arg(args.get("toX"), -100000, 100000, 0) as i32;
+    let to_y = int_arg(args.get("toY"), -100000, 100000, 0) as i32;
+    let button = args.get("button").map(cu_core::js::js_string_of).unwrap_or_else(|| "left".to_string()).to_lowercase();
+    let button = if button.is_empty() { "left".to_string() } else { button };
+    let (down, up) = button_flags(&button);
+    let mut rng = SimpleRng::new((from_x as u64).wrapping_add(from_y as u64));
+    unsafe {
+        let _ = SetCursorPos(from_x, from_y);
+    }
+    thread::sleep(Duration::from_millis(rng.range(40, 90) as u64));
+    unsafe { mouse_event(down, 0, 0, 0, 0); }
+    thread::sleep(Duration::from_millis(rng.range(50, 110) as u64));
+    let dist = ((to_x - from_x) as f64).hypot((to_y - from_y) as f64);
+    let steps = (dist / 22.0).max(10.0).min(28.0) as i32;
+    let steps = steps.max(10);
+    for i in 1..=steps {
+        let t = i as f64 / steps as f64;
+        let smooth = t * t * (3.0 - 2.0 * t);
+        let jx = if i < steps { rng.range(-3, 3) } else { 0 };
+        let jy = if i < steps { rng.range(-3, 3) } else { 0 };
+        let cur_x = (from_x as f64 + (to_x - from_x) as f64 * smooth) as i32 + jx;
+        let cur_y = (from_y as f64 + (to_y - from_y) as f64 * smooth) as i32 + jy;
+        unsafe { let _ = SetCursorPos(cur_x, cur_y); }
+        thread::sleep(Duration::from_millis(rng.range(8, 22) as u64));
+    }
+    unsafe { let _ = SetCursorPos(to_x, to_y); }
+    thread::sleep(Duration::from_millis(rng.range(50, 110) as u64));
+    unsafe { mouse_event(up, 0, 0, 0, 0); }
+}
+
+fn native_human_scroll(args: &Value) {
+    let dy = int_arg(args.get("dy"), -100000, 100000, 0);
+    let dx = int_arg(args.get("dx"), -100000, 100000, 0);
+    let x = int_arg(args.get("x"), -100000, 100000, 0) as i32;
+    let y = int_arg(args.get("y"), -100000, 100000, 0) as i32;
+    let total = dy.abs().max(dx.abs()).max(1);
+    let steps = (total / 120).max(1).min(8) as usize;
+    let mut rest_y = dy;
+    let mut rest_x = dx;
+    for i in (1..=steps).rev() {
+        let step_y = rest_y / i as i64;
+        let step_x = rest_x / i as i64;
+        rest_y -= step_y;
+        rest_x -= step_x;
+        if step_y != 0 || step_x != 0 {
+            unsafe {
+                let _ = SetCursorPos(x, y);
+                mouse_event(MOUSEEVENTF_WHEEL, 0, 0, step_y as i32, 0);
+                if step_x != 0 {
+                    mouse_event(MOUSEEVENTF_HWHEEL, 0, 0, step_x as i32, 0);
+                }
+            }
+        }
+        if i > 1 {
+            thread::sleep(Duration::from_millis(35 + (SimpleRng::new(i as u64).next() % 45)));
+        }
+    }
+}
+
+fn native_human_type(text: &str, is_secret: bool) {
+    let _ = is_secret;
+    let mut rng = SimpleRng::new(text.len() as u64 + 1);
+    for ch in text.chars() {
+        let escaped = ch.to_string();
+        // Send unicode char.
+        send_unicode_char(ch, false);
+        thread::sleep(Duration::from_millis(10));
+        send_unicode_char(ch, true);
+        let mut delay = rng.range(45, 110) as u64;
+        if rng.range(0, 9) == 0 {
+            delay += rng.range(80, 180) as u64;
+        }
+        thread::sleep(Duration::from_millis(delay));
+        let _ = escaped;
+    }
+}
+
+fn handle_click(args: &Value, is_double: bool) -> ToolOut {
+    if let Some(tw) = args.get("target_window") {
+        if !tw.is_null() { unsafe { focus_window(tw) }; }
+    }
+    let x = int_arg(args.get("x"), -100000, 100000, 0) as i32;
+    let y = int_arg(args.get("y"), -100000, 100000, 0) as i32;
+    // si no vino x/y explícito (acepts ya lo garantiza), error.
+    if args.get("x").is_none() || args.get("y").is_none() {
+        return ToolOut::Json(json!({"ok": false, "error": "x,y or id or ref is required"}), true);
+    }
+    let button = args.get("button").map(cu_core::js::js_string_of).unwrap_or_else(|| "left".to_string()).to_lowercase();
+    let button = if button.is_empty() { "left".to_string() } else { button };
+    let humanize = args.get("human_like").map(|v| cu_core::js::js_truthy(v)).unwrap_or(false)
+        || args.get("behavior").and_then(Value::as_str) == Some("humanized");
+
+    if humanize {
+        let res = native_human_click(x, y, &button, is_double);
+        let epoch = cu_core::epoch::bump();
+        let action = if is_double { "double_click" } else { "click" };
+        return ToolOut::Json(json!({"ok": true, "action": action, "x": x, "y": y, "behavior": "humanized", "epoch": epoch, "human_click": res}), false);
+    }
+
+    unsafe {
+        let _ = SetCursorPos(x, y);
+        let (down, up) = button_flags(&button);
+        if is_double {
+            mouse_event(down, 0, 0, 0, 0);
+            thread::sleep(Duration::from_millis(20));
+            mouse_event(up, 0, 0, 0, 0);
+            thread::sleep(Duration::from_millis(40));
+            mouse_event(down, 0, 0, 0, 0);
+            thread::sleep(Duration::from_millis(20));
+            mouse_event(up, 0, 0, 0, 0);
+        } else {
+            mouse_event(down, 0, 0, 0, 0);
+            thread::sleep(Duration::from_millis(20));
+            mouse_event(up, 0, 0, 0, 0);
+        }
+    }
+    let epoch = cu_core::epoch::bump();
+    let action = if is_double { "double_click" } else { "click" };
+    let payload = json!({"ok": true, "action": action, "x": x, "y": y, "behavior": "foreground", "epoch": epoch});
+    ToolOut::Json(payload, false)
+}
+
+fn handle_human_click(args: &Value) -> ToolOut {
+    if let Some(tw) = args.get("target_window") {
+        if !tw.is_null() { unsafe { focus_window(tw) }; }
+    }
+    let x = int_arg(args.get("x"), -100000, 100000, 0) as i32;
+    let y = int_arg(args.get("y"), -100000, 100000, 0) as i32;
+    if args.get("x").is_none() || args.get("y").is_none() {
+        return ToolOut::Json(json!({"ok": false, "error": "x,y or id is required"}), true);
+    }
+    let button = args.get("button").map(cu_core::js::js_string_of).unwrap_or_else(|| "left".to_string());
+    let button = if button.is_empty() { "left".to_string() } else { button };
+    let double = args.get("double_click").map(|v| cu_core::js::js_truthy(v)).unwrap_or(false);
+    let res = native_human_click(x, y, &button, double);
+    let epoch = cu_core::epoch::bump();
+    ToolOut::Json(json!({"ok": true, "human_click": res, "epoch": epoch}), false)
+}
+
+fn handle_drag(args: &Value) -> ToolOut {
+    if let Some(tw) = args.get("target_window") {
+        if !tw.is_null() { unsafe { focus_window(tw) }; }
+    }
+    let from_x = int_arg(args.get("fromX"), -100000, 100000, 0) as i32;
+    let from_y = int_arg(args.get("fromY"), -100000, 100000, 0) as i32;
+    let to_x = int_arg(args.get("toX"), -100000, 100000, 0) as i32;
+    let to_y = int_arg(args.get("toY"), -100000, 100000, 0) as i32;
+    let button = args.get("button").map(cu_core::js::js_string_of).unwrap_or_else(|| "left".to_string()).to_lowercase();
+    let button = if button.is_empty() { "left".to_string() } else { button };
+    let humanize = args.get("human_like").map(|v| cu_core::js::js_truthy(v)).unwrap_or(false)
+        || args.get("behavior").and_then(Value::as_str) == Some("humanized");
+
+    if humanize {
+        native_human_drag(args);
+    } else {
+        // nativeMouseAction drag (8 steps smooth)
+        let (down, up) = button_flags(&button);
+        unsafe {
+            let _ = SetCursorPos(from_x, from_y);
+            mouse_event(down, 0, 0, 0, 0);
+            thread::sleep(Duration::from_millis(60));
+            let steps = 8i32;
+            for i in 1..=steps {
+                let t = i as f64 / steps as f64;
+                let smooth = t * t * (3.0 - 2.0 * t);
+                let cur_x = (from_x as f64 + (to_x - from_x) as f64 * smooth) as i32;
+                let cur_y = (from_y as f64 + (to_y - from_y) as f64 * smooth) as i32;
+                let _ = SetCursorPos(cur_x, cur_y);
+                thread::sleep(Duration::from_millis(15));
+            }
+            let _ = SetCursorPos(to_x, to_y);
+            thread::sleep(Duration::from_millis(40));
+            mouse_event(up, 0, 0, 0, 0);
+        }
+    }
+    let epoch = cu_core::epoch::bump();
+    let behavior = if humanize { "humanized" } else { "foreground" };
+    ToolOut::Json(json!({"ok": true, "action": "drag", "behavior": behavior, "epoch": epoch}), false)
+}
+
+fn handle_scroll(args: &Value) -> ToolOut {
+    if let Some(tw) = args.get("target_window") {
+        if !tw.is_null() { unsafe { focus_window(tw) }; }
+    }
+    let x = int_arg(args.get("x"), -100000, 100000, 0) as i32;
+    let y = int_arg(args.get("y"), -100000, 100000, 0) as i32;
+    let dy = int_arg(args.get("dy"), -100000, 100000, 0);
+    let dx = int_arg(args.get("dx"), -100000, 100000, 0);
+    let humanize = args.get("human_like").map(|v| cu_core::js::js_truthy(v)).unwrap_or(false)
+        || args.get("behavior").and_then(Value::as_str) == Some("humanized");
+
+    if humanize {
+        native_human_scroll(args);
+    } else {
+        unsafe {
+            if x != 0 || y != 0 { let _ = SetCursorPos(x, y); }
+            mouse_event(MOUSEEVENTF_WHEEL, 0, 0, dy as i32, 0);
+            if dx != 0 {
+                mouse_event(MOUSEEVENTF_HWHEEL, 0, 0, dx as i32, 0);
+            }
+        }
+    }
+    let epoch = cu_core::epoch::bump();
+    let behavior = if humanize { "humanized" } else { "foreground" };
+    ToolOut::Json(json!({"ok": true, "action": "scroll", "behavior": behavior, "epoch": epoch}), false)
+}
+
+fn handle_type(args: &Value) -> ToolOut {
+    if let Some(tw) = args.get("target_window") {
+        if !tw.is_null() { unsafe { focus_window(tw) }; }
+    }
+    let mut plain_text = args.get("text").map(cu_core::js::js_string_of).unwrap_or_default();
+    let is_secret = args.get("is_secret").map(|v| cu_core::js::js_truthy(v)).unwrap_or(false)
+        || args.get("secret_b64").is_some();
+    if let Some(b64) = args.get("secret_b64").and_then(Value::as_str) {
+        if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(b64) {
+            plain_text = String::from_utf8_lossy(&bytes).to_string();
+        }
+    }
+    let clear_first = args.get("clear_first").map(|v| cu_core::js::js_truthy(v)).unwrap_or(false);
+    if clear_first {
+        native_key_action("a", "tap", &["ctrl".to_string()]);
+        native_key_action("Backspace", "tap", &[]);
+    }
+    let jitter = args.get("human_jitter").map(|v| cu_core::js::js_truthy(v)).unwrap_or(false)
+        || args.get("human_like").map(|v| cu_core::js::js_truthy(v)).unwrap_or(false)
+        || args.get("behavior").and_then(Value::as_str) == Some("humanized");
+
+    if jitter {
+        native_human_type(&plain_text, is_secret);
+    } else {
+        for ch in plain_text.chars() {
+            send_unicode_char(ch, false);
+            thread::sleep(Duration::from_millis(2));
+            send_unicode_char(ch, true);
+        }
+    }
+    let press_enter = args.get("press_enter").map(|v| cu_core::js::js_truthy(v)).unwrap_or(false);
+    if press_enter {
+        native_key_action("Enter", "tap", &[]);
+    }
+    let epoch = cu_core::epoch::bump();
+    let behavior = if jitter { "humanized" } else { "foreground" };
+    ToolOut::Json(json!({"ok": true, "action": "type", "secret": is_secret, "behavior": behavior, "human_jitter": jitter, "epoch": epoch}), false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -629,5 +1070,19 @@ mod tests {
         assert_eq!(get_vk("Z"), 0x5A);
         assert_eq!(get_vk("Enter"), 0x0D);
         assert_eq!(get_vk("F5"), 0x74);
+    }
+
+    #[test]
+    fn accepts_subsets() {
+        use serde_json::json;
+        assert!(accepts("computer_click", &json!({"x": 10, "y": 20})));
+        assert!(!accepts("computer_click", &json!({"x": 10, "y": 20, "id": 5})));
+        assert!(!accepts("computer_click", &json!({"x": 10, "y": 20, "behavior": "headless"})));
+        assert!(accepts("computer_type", &json!({"text": "hi"})));
+        assert!(!accepts("computer_type", &json!({"text": "hi", "id": 3})));
+        assert!(!accepts("computer_bulk_input", &json!({"rows": [[1]], "target_text": "x"})));
+        assert!(accepts("computer_bulk_input", &json!({"rows": [[1]], "target_x": 5, "target_y": 6, "target_text": "x"})));
+        assert!(!accepts("computer_fill_form", &json!({})));
+        assert!(!accepts("computer_scroll_to_text", &json!({"text":"x"})));
     }
 }
