@@ -723,6 +723,13 @@ async fn native_cluster(
     msg: &Value,
     stdout: &mut tokio::io::Stdout,
 ) -> anyhow::Result<()> {
+    // Progress: si el cliente mandó progressToken, emitimos al menos un evento
+    // notifications/progress (el origen lo hace durante el polling de wait_stable).
+    if let Some(tok) = msg.pointer("/params/_meta/progressToken") {
+        let note = json!({"jsonrpc":"2.0","method":"notifications/progress",
+            "params": {"progressToken": tok.clone(), "progress": 1, "total": 1}});
+        respond_raw(stdout, &note.to_string()).await?;
+    }
     let args = msg["params"]["arguments"].clone();
     let args_rec = args.clone();
     let id = msg.get("id").cloned().unwrap_or(Value::Null);

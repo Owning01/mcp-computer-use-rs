@@ -1967,6 +1967,296 @@ fn handle_click_text(args: &Value) -> ToolOut {
     ToolOut::Json(payload, false)
 }
 
+// ---------------- wait_stable (sync) ----------------
+
+fn handle_wait_stable(args: &Value) -> ToolOut {
+    let timeout_ms = args.get("timeout_ms").and_then(as_i64).unwrap_or(10000).clamp(100, 60000);
+    let interval_ms = args.get("interval_ms").and_then(as_i64).unwrap_or(300).clamp(100, 5000);
+    let stable_samples = args.get("stable_samples").and_then(as_i64).unwrap_or(2).max(1);
+    let max_results = args.get("max_results").and_then(as_i64).unwrap_or(150);
+    let hwnd = args.get("hwnd").and_then(as_i64).unwrap_or(0);
+    let target_window = args.get("target_window").and_then(as_str).unwrap_or("").to_string();
+
+    let started = now_ms();
+    let mut last_fp: Option<String> = None;
+    let mut last_change_at = started;
+    let mut stable_count = 0i64;
+    let mut samples = 0i64;
+    let mut window_title = String::new();
+    let mut current_fp: Option<String> = None;
+
+    while now_ms() - started < timeout_ms {
+        let collected = collect_elements(hwnd, &target_window, 30, max_results, false, false);
+        if collected.ok {
+            let fp = fingerprint_of(&collected.elements, &collected.window_title, collected.pid, collected.hwnd);
+            samples += 1;
+            if last_fp.as_ref() == Some(&fp) {
+                stable_count += 1;
+            } else {
+                stable_count = 1;
+                last_change_at = now_ms();
+            }
+            last_fp = Some(fp.clone());
+            current_fp = Some(fp.clone());
+            window_title = collected.window_title.clone();
+            if stable_count >= stable_samples {
+                *last_fp_store().lock().unwrap() = Some(fp.clone());
+                let payload = json!({
+                    "ok": true,
+                    "stable": true,
+                    "elapsed_ms": now_ms() - started,
+                    "samples": samples,
+                    "fingerprint": fp,
+                    "window_title": window_title
+                });
+                return ToolOut::JsonStructured(payload, false);
+            }
+        }
+        if now_ms() - started >= timeout_ms { break; }
+        std::thread::sleep(std::time::Duration::from_millis(interval_ms as u64));
+    }
+    if let Some(fp) = &current_fp {
+        *last_fp_store().lock().unwrap() = Some(fp.clone());
+    }
+    let payload = json!({
+        "ok": true,
+        "stable": false,
+        "elapsed_ms": now_ms() - started,
+        "last_change_ago_ms": now_ms() - last_change_at,
+        "fingerprint": current_fp,
+        "samples": samples,
+        "window_title": window_title
+    });
+    ToolOut::JsonStructured(payload, false)
+}
+
+// helper alias for last_fp static (already defined as last_fp())
+fn last_fp_store() -> &'static Mutex<Option<String>> { last_fp() }
+
+// ---------------- fill_form ----------------
+
+fn set_clipboard_text(text: &str) -> bool {
+    use windows::Win32::System::DataExchange::*;
+    use windows::Win32::System::Memory::*;
+    use windows::Win32::Foundation::*;
+    unsafe {
+        if OpenClipboard(None).is_err() { return false; }
+        let _ = EmptyClipboard();
+        let mut bytes: Vec<u8> = text.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        let h = match GlobalAlloc(GMEM_MOVEABLE, bytes.len()) { Ok(v) => v, Err(_) => { let _ = CloseClipboard(); return false; } };
+        let ptr = GlobalLock(h);
+        if ptr.is_null() { let _ = GlobalFree(Some(h)); let _ = CloseClipboard(); return false; }
+        std::ptr::copy_nonoverlapping(bytes.as_ptr(), ptr as *mut u8, bytes.len());
+        let _ = GlobalUnlock(h);
+        let _ = SetClipboardData(13, Some(windows::Win32::Foundation::HANDLE(h.0)));
+        let _ = CloseClipboard();
+        true
+    }
+}
+
+fn handle_fill_form(args: &Value) -> ToolOut {
+    let target_window = args.get("target_window").and_then(as_str).unwrap_or("").to_string();
+    let fields = args.get("fields").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    let submit_button = args.get("submit_button").and_then(as_str).unwrap_or("").to_string();
+
+    let act = active_window_info();
+    let mut target_hwnd = act.2;
+    if target_hwnd == 0 { target_hwnd = foreground_hwnd(); }
+
+    let mut results = Vec::new();
+    let synonyms: &[(&str, &[&str])] = &[
+        ("email", &["email","e-mail","correo","correo electrónico","usuario","user","username"]),
+        ("correo", &["correo","correo electrónico","email","e-mail","usuario","user"]),
+        ("usuario", &["usuario","user","username","email","correo","identificación","cuenta"]),
+        ("password", &["password","contraseña","clave","pass","pin","código"]),
+        ("contraseña", &["contraseña","password","clave","pass","código"]),
+        ("clave", &["clave","contraseña","password"]),
+        ("buscar", &["buscar","search","búsqueda","explore"]),
+        ("search", &["search","buscar","find","query"]),
+    ];
+
+    for f in &fields {
+        let fobj = f.as_object().cloned().unwrap_or_default();
+        let label = fobj.get("label").and_then(as_str).unwrap_or("").to_string();
+        let value = if fobj.get("secret_b64").is_some() {
+            // decode base64
+            use base64::Engine;
+            base64::engine::general_purpose::STANDARD.decode(fobj.get("secret_b64").and_then(as_str).unwrap_or("")).ok()
+                .and_then(|b| String::from_utf8(b).ok()).unwrap_or_default()
+        } else {
+            fobj.get("value").and_then(as_str).unwrap_or("").to_string()
+        };
+        let clear_first = fobj.get("clear_first").and_then(as_bool).unwrap_or(true);
+        let offset_x = fobj.get("offset_x").and_then(as_i64).unwrap_or(80);
+        let offset_y = fobj.get("offset_y").and_then(as_i64).unwrap_or(0);
+
+        let mut queries = vec![label.clone()];
+        let lower = label.to_lowercase();
+        for (key, syns) in synonyms {
+            if lower.contains(key) {
+                for s in *syns { if !queries.contains(&s.to_string()) { queries.push(s.to_string()); } }
+            }
+        }
+
+        let mut matched: Option<Value> = None;
+        for q in &queries {
+            let ins = handle_inspect_ui(&json!({"name": q, "hwnd": target_hwnd, "max_results": 15}));
+            if let ToolOut::Json(v, _) = &ins {
+                if let Some(arr) = v.get("elements").and_then(|x| x.as_array()) {
+                    if let Some(el) = arr.iter().find(|e| !e.get("offscreen").and_then(as_bool).unwrap_or(false) && e.get("width").and_then(as_i64).unwrap_or(0) > 0 && e.get("height").and_then(as_i64).unwrap_or(0) > 0) {
+                        matched = Some(el.clone());
+                        break;
+                    }
+                }
+            }
+        }
+
+        if let Some(el) = matched {
+            let is_edit = el.get("control_type").and_then(as_str).unwrap_or("") == "Edit";
+            let mx = if is_edit {
+                el.get("x").and_then(as_i64).unwrap_or(0) + el.get("width").and_then(as_i64).unwrap_or(0) / 2 + offset_x
+            } else {
+                el.get("x").and_then(as_i64).unwrap_or(0) + offset_x
+            };
+            // origin: if not edit, offset_x default 80 means click to right of label
+            let mx = if is_edit {
+                mx
+            } else {
+                el.get("x").and_then(as_i64).unwrap_or(0) + (if fobj.get("offset_x").is_some() { offset_x } else { el.get("width").and_then(as_i64).unwrap_or(0) + 50 })
+            };
+            let my = el.get("y").and_then(as_i64).unwrap_or(0) + el.get("height").and_then(as_i64).unwrap_or(0) / 2 + offset_y;
+
+            // click
+            unsafe {
+                use windows::Win32::UI::WindowsAndMessaging::SetCursorPos;
+                use windows::Win32::UI::Input::KeyboardAndMouse::{mouse_event, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP};
+                let _ = SetCursorPos(mx as i32, my as i32);
+                std::thread::sleep(std::time::Duration::from_millis(20));
+                mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+                mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(60));
+
+            if clear_first {
+                unsafe {
+                    use windows::Win32::UI::Input::KeyboardAndMouse::keybd_event;
+                    use windows::Win32::UI::Input::KeyboardAndMouse::KEYBD_EVENT_FLAGS;
+                    keybd_event(0x11, 0, KEYBD_EVENT_FLAGS(0), 0); // ctrl down
+                    keybd_event(0x41, 0, KEYBD_EVENT_FLAGS(0), 0); // a
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                    keybd_event(0x41, 0, KEYBD_EVENT_FLAGS(2), 0);
+                    keybd_event(0x11, 0, KEYBD_EVENT_FLAGS(2), 0);
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                    keybd_event(0x08, 0, KEYBD_EVENT_FLAGS(0), 0); // backspace
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                    keybd_event(0x08, 0, KEYBD_EVENT_FLAGS(2), 0);
+                }
+            }
+
+            if !value.is_empty() {
+                let _ = set_clipboard_text(&value);
+                std::thread::sleep(std::time::Duration::from_millis(30));
+                unsafe {
+                    use windows::Win32::UI::Input::KeyboardAndMouse::keybd_event;
+                    use windows::Win32::UI::Input::KeyboardAndMouse::KEYBD_EVENT_FLAGS;
+                    keybd_event(0x11, 0, KEYBD_EVENT_FLAGS(0), 0); // ctrl
+                    keybd_event(0x56, 0, KEYBD_EVENT_FLAGS(0), 0); // v
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                    keybd_event(0x56, 0, KEYBD_EVENT_FLAGS(2), 0);
+                    keybd_event(0x11, 0, KEYBD_EVENT_FLAGS(2), 0);
+                }
+            }
+
+            let id = el.get("automation_id").and_then(as_str).unwrap_or("").to_string();
+            results.push(json!({"status": "filled", "method": "uia", "label": label, "id": id}));
+        } else {
+            results.push(json!({"status": "not_found", "label": label}));
+        }
+    }
+
+    let mut submitted = false;
+    if !submit_button.is_empty() {
+        let ins = handle_inspect_ui(&json!({"name": submit_button, "hwnd": target_hwnd, "max_results": 5}));
+        if let ToolOut::Json(v, _) = &ins {
+            if let Some(arr) = v.get("elements").and_then(|x| x.as_array()) {
+                if let Some(el) = arr.first() {
+                    let cx = el.get("x").and_then(as_i64).unwrap_or(0) + el.get("width").and_then(as_i64).unwrap_or(0) / 2;
+                    let cy = el.get("y").and_then(as_i64).unwrap_or(0) + el.get("height").and_then(as_i64).unwrap_or(0) / 2;
+                    unsafe {
+                        use windows::Win32::UI::WindowsAndMessaging::SetCursorPos;
+                        use windows::Win32::UI::Input::KeyboardAndMouse::{mouse_event, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP};
+                        let _ = SetCursorPos(cx as i32, cy as i32);
+                        std::thread::sleep(std::time::Duration::from_millis(20));
+                        mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+                        mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+                    }
+                    submitted = true;
+                }
+            }
+        }
+    }
+
+    let epoch = cu_core::epoch::bump();
+    ToolOut::Json(json!({"ok": true, "results": results, "submitted": submitted, "epoch": epoch}), false)
+}
+
+// ---------------- scroll_to_text ----------------
+
+fn handle_scroll_to_text(args: &Value) -> ToolOut {
+    let needle = args.get("text").and_then(as_str).unwrap_or("").trim().to_string();
+    if needle.is_empty() {
+        return ToolOut::Json(json!({"ok": false, "error": "text parameter is required"}), true);
+    }
+    let max_scrolls = args.get("max_scrolls").and_then(as_i64).unwrap_or(5).clamp(1, 15);
+    let scroll_amount = args.get("scroll_amount").and_then(as_i64).unwrap_or(-400);
+    let target_window = args.get("target_window").and_then(as_str).unwrap_or("").to_string();
+    let hwnd = args.get("hwnd").and_then(as_i64).unwrap_or(0);
+    let hwnd = if hwnd > 0 { hwnd } else { foreground_hwnd() };
+
+    for i in 0..=max_scrolls {
+        let ins = handle_inspect_ui(&json!({"name": needle, "hwnd": hwnd, "max_results": 10}));
+        if let ToolOut::Json(v, _) = &ins {
+            if let Some(arr) = v.get("elements").and_then(|x| x.as_array()) {
+                if let Some(el) = arr.iter().find(|e| !e.get("offscreen").and_then(as_bool).unwrap_or(false) && e.get("width").and_then(as_i64).unwrap_or(0) > 0) {
+                    let epoch = cu_core::epoch::bump();
+                    let mut res = el.clone();
+                    res["text"] = json!(el.get("name").cloned().unwrap_or(json!("")));
+                    let payload = json!({
+                        "ok": true,
+                        "found": true,
+                        "scrolls_performed": i,
+                        "element": res,
+                        "source": "uia",
+                        "epoch": epoch
+                    });
+                    return ToolOut::Json(payload, false);
+                }
+            }
+        }
+
+        if i < max_scrolls {
+            let act = active_window_info();
+            let cx = act.2; // hwnd not coords; use foreground window rect? fallback 0
+            // We don't have window rect here; scroll at center of screen
+            unsafe {
+                use windows::Win32::UI::Input::KeyboardAndMouse::mouse_event;
+                use windows::Win32::UI::Input::KeyboardAndMouse::MOUSEEVENTF_WHEEL;
+                // move cursor to center of primary screen
+                use windows::Win32::UI::WindowsAndMessaging::{SetCursorPos, GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
+                let sw = GetSystemMetrics(SM_CXSCREEN);
+                let sh = GetSystemMetrics(SM_CYSCREEN);
+                let _ = SetCursorPos(sw/2, sh/2);
+                mouse_event(MOUSEEVENTF_WHEEL, 0, 0, scroll_amount as i32, 0);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(350));
+        }
+    }
+
+    let epoch = cu_core::epoch::bump();
+    ToolOut::Json(json!({"ok": false, "found": false, "scrolls_performed": max_scrolls, "message": format!("Text \"{}\" not found after {} scrolls.", needle, max_scrolls), "epoch": epoch}), false)
+}
+
 // ---------------- lib entry ----------------
 
 pub fn handles(name: &str) -> bool {
@@ -1975,7 +2265,8 @@ pub fn handles(name: &str) -> bool {
         "computer_find_element" | "computer_map_ui" | "computer_find_template" |
         "computer_ui_action" | "computer_read_selection" | "computer_observe" |
         "computer_system_tray" | "computer_context_menu" | "computer_toast_action" |
-        "computer_background_action" | "computer_click_text"
+        "computer_background_action" | "computer_click_text" |
+        "computer_wait_stable" | "computer_fill_form" | "computer_scroll_to_text"
     )
 }
 
@@ -1997,6 +2288,9 @@ pub fn accepts(name: &str, args: &Value) -> bool {
         "computer_toast_action" => args.get("action").and_then(as_str).unwrap_or("list") == "click_button",
         "computer_background_action" => true,
         "computer_click_text" => args.get("text").and_then(as_str).map(|s| !s.trim().is_empty()).unwrap_or(false),
+        "computer_wait_stable" => !args.get("async").and_then(as_bool).unwrap_or(false) && args.get("task").is_none(),
+        "computer_fill_form" => args.get("fields").and_then(|v| v.as_array()).map(|a| !a.is_empty()).unwrap_or(false),
+        "computer_scroll_to_text" => args.get("text").and_then(as_str).map(|s| !s.trim().is_empty()).unwrap_or(false),
         "computer_find_template" => args.get("template_b64").and_then(|v| v.as_str()).map(|s| !s.trim().is_empty()).unwrap_or(false),
         _ => true,
     }
@@ -2019,6 +2313,9 @@ pub fn handle_call(name: &str, args: &Value) -> ToolOut {
         "computer_toast_action" => handle_toast_action(args),
         "computer_background_action" => handle_background_action(args),
         "computer_click_text" => handle_click_text(args),
+        "computer_wait_stable" => handle_wait_stable(args),
+        "computer_fill_form" => handle_fill_form(args),
+        "computer_scroll_to_text" => handle_scroll_to_text(args),
         _ => ToolOut::Json(json!({"ok": false, "error": "not_implemented"}), true),
     }
 }
