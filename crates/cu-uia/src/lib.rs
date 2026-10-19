@@ -896,15 +896,224 @@ fn evaluate_expectation(expect: &Value, elements: &[Map<String, Value>], window_
 
 struct EvalResult { checks: Value, all_pass: bool }
 
+// ---------------- find_element / map_ui ----------------
+
+fn foreground_hwnd() -> i64 {
+    unsafe {
+        use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+        let fg = GetForegroundWindow();
+        fg.0 as i64
+    }
+}
+
+fn handle_find_element(args: &Value) -> ToolOut {
+    let mut a = args.clone();
+    if a.get("max_results").is_none() {
+        a["max_results"] = json!(20);
+    }
+    handle_inspect_ui(&a)
+}
+
+fn handle_map_ui(args: &Value) -> ToolOut {
+    let hwnd = args.get("hwnd").and_then(as_i64).unwrap_or(0);
+    let hwnd = if hwnd > 0 { hwnd } else { foreground_hwnd() };
+    let target_window = args.get("target_window").and_then(as_str).unwrap_or("").to_string();
+    let collected = collect_elements(hwnd, &target_window, 12, 150, false, false);
+    let mut elements = Vec::new();
+    let mut id = 1i64;
+    if collected.ok {
+        let interactive_types = ["Button","Edit","MenuItem","CheckBox","RadioButton","TabItem","ComboBox","Hyperlink","Document","ListItem","TreeItem"];
+        for el in &collected.elements {
+            let ct = el.get("control_type").and_then(as_str).unwrap_or("");
+            let off = el.get("offscreen").and_then(as_bool).unwrap_or(false);
+            let w = el.get("width").and_then(as_i64).unwrap_or(0);
+            let h = el.get("height").and_then(as_i64).unwrap_or(0);
+            if off || w <= 5 || h <= 5 { continue; }
+            if !interactive_types.contains(&ct) { continue; }
+            let name = el.get("name").and_then(as_str).unwrap_or("(unnamed)").to_string();
+            let name = if name.is_empty() { "(unnamed)".to_string() } else { name };
+            let item = json!({
+                "id": id,
+                "type": ct,
+                "name": name,
+                "x": el.get("x").cloned().unwrap_or(json!(0)),
+                "y": el.get("y").cloned().unwrap_or(json!(0)),
+                "width": el.get("width").cloned().unwrap_or(json!(0)),
+                "height": el.get("height").cloned().unwrap_or(json!(0))
+            });
+            elements.push(item);
+            id += 1;
+        }
+    }
+    ToolOut::Json(json!({"count": elements.len(), "elements": elements}), false)
+}
+
+// ---------------- find_template ----------------
+
+fn capture_region_rgba(hwnd: i64) -> (i64, i64, image::RgbaImage) {
+    unsafe {
+        use windows::Win32::Foundation::RECT as R;
+        use windows::Win32::Graphics::Gdi::*;
+        use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN, GetWindowRect};
+        let target = if hwnd > 0 { windows::Win32::Foundation::HWND(hwnd as *mut _) } else { GetForegroundWindow() };
+        let mut rect = R::default();
+        let mut ox = 0i64;
+        let mut oy = 0i64;
+        let mut w = 0i64;
+        let mut h = 0i64;
+        if GetWindowRect(target, &mut rect).is_ok() {
+            w = (rect.right - rect.left) as i64;
+            h = (rect.bottom - rect.top) as i64;
+            if w > 20 && h > 20 {
+                ox = rect.left as i64;
+                oy = rect.top as i64;
+            } else {
+                w = 0; h = 0;
+            }
+        }
+        if w == 0 || h == 0 {
+            w = GetSystemMetrics(SM_CXSCREEN) as i64;
+            h = GetSystemMetrics(SM_CYSCREEN) as i64;
+            ox = 0; oy = 0;
+        }
+        if w <= 0 || h <= 0 {
+            w = 1920; h = 1080;
+        }
+        let screen_dc = GetDC(None);
+        let mem_dc = CreateCompatibleDC(Some(screen_dc));
+        let mut bmi = BITMAPINFO::default();
+        bmi.bmiHeader = BITMAPINFOHEADER {
+            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: w as i32,
+            biHeight: -(h as i32),
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: BI_RGB.0,
+            ..Default::default()
+        };
+        let mut bits: *mut std::ffi::c_void = std::ptr::null_mut();
+        let hbmp = CreateDIBSection(Some(mem_dc), &bmi, DIB_RGB_COLORS, &mut bits, None, 0).unwrap();
+        let old = SelectObject(mem_dc, hbmp.into());
+        let _ = BitBlt(mem_dc, 0, 0, w as i32, h as i32, Some(screen_dc), ox as i32, oy as i32, SRCCOPY);
+        let mut data = vec![0u8; (w * h * 4) as usize];
+        if !bits.is_null() {
+            std::ptr::copy_nonoverlapping(bits as *const u8, data.as_mut_ptr(), data.len());
+        }
+        let _ = SelectObject(mem_dc, old);
+        let _ = DeleteObject(hbmp.into());
+        let _ = DeleteDC(mem_dc);
+        ReleaseDC(None, screen_dc);
+        let img = image::RgbaImage::from_raw(w as u32, h as u32, data).unwrap_or_else(|| image::RgbaImage::new(1,1));
+        (ox, oy, img)
+    }
+}
+
+fn handle_find_template(args: &Value) -> ToolOut {
+    let tmpl_b64 = args.get("template_b64").and_then(as_str).unwrap_or("").trim().to_string();
+    if tmpl_b64.is_empty() {
+        return ToolOut::Json(json!({"ok": false, "error": "template_b64 parameter is required"}), true);
+    }
+    let min_conf = args.get("min_confidence").and_then(|v| v.as_f64()).unwrap_or(0.75).clamp(0.0, 1.0);
+    let hwnd = args.get("hwnd").and_then(as_i64).unwrap_or(0);
+
+    use base64::Engine;
+    let bytes = match base64::engine::general_purpose::STANDARD.decode(&tmpl_b64) {
+        Ok(b) => b,
+        Err(_) => return ToolOut::Json(json!({"ok": false, "error": "invalid base64"}), true),
+    };
+    let tmpl = match image::load_from_memory(&bytes) {
+        Ok(d) => d.to_rgba8(),
+        Err(_) => return ToolOut::Json(json!({"ok": false, "error": "invalid image"}), true),
+    };
+    let (ox, oy, screen) = capture_region_rgba(hwnd);
+
+    let sw = screen.width() as usize;
+    let sh = screen.height() as usize;
+    let tw = tmpl.width() as usize;
+    let th = tmpl.height() as usize;
+
+    if tw > sw || th > sh || tw < 3 || th < 3 {
+        let payload = json!({
+            "ok": true, "found": false, "x": 0, "y": 0, "center_x": 0, "center_y": 0,
+            "width": tmpl.width(), "height": tmpl.height(),
+            "confidence": 0.0
+        });
+        return ToolOut::Json(payload, false);
+    }
+
+    let step: usize = if sw > 1920 { 2 } else { 1 };
+    let mut best_x: i64 = -1;
+    let mut best_y: i64 = -1;
+    let mut min_diff: i64 = i64::MAX;
+
+    for y in (0..=(sh - th)).step_by(step) {
+        for x in (0..=(sw - tw)).step_by(step) {
+            let mut diff: i64 = 0;
+            for ty in (0..th).step_by(2) {
+                for tx in (0..tw).step_by(2) {
+                    let sp = screen.get_pixel((x + tx) as u32, (y + ty) as u32);
+                    let tp = tmpl.get_pixel(tx as u32, ty as u32);
+                    diff += (sp[0] as i64 - tp[0] as i64).abs();
+                    diff += (sp[1] as i64 - tp[1] as i64).abs();
+                    diff += (sp[2] as i64 - tp[2] as i64).abs();
+                }
+            }
+            if diff < min_diff {
+                min_diff = diff;
+                best_x = x as i64;
+                best_y = y as i64;
+                if min_diff == 0 { break; }
+            }
+        }
+        if min_diff == 0 { break; }
+    }
+
+    let sample_count = ((tw as f64 / 2.0).ceil() * (th as f64 / 2.0).ceil()) as i64;
+    let max_diff = sample_count * 255 * 3;
+    let conf = if max_diff == 0 { 1.0 } else { (1.0 - (min_diff as f64 / max_diff as f64)).max(0.0) };
+
+    let found = best_x >= 0 && conf >= min_conf;
+    let (fx, fy) = if found { (best_x + ox, best_y + oy) } else { (0i64, 0i64) };
+    let (cx, cy) = if found { (best_x + ox + (tw as i64 / 2), best_y + oy + (th as i64 / 2)) } else { (0i64, 0i64) };
+    let conf_pct = (conf * 100.0).round() as i32;
+    let confidence = conf_pct as f64 / 100.0;
+    let payload = json!({
+        "ok": true,
+        "found": found,
+        "x": fx,
+        "y": fy,
+        "center_x": cx,
+        "center_y": cy,
+        "width": tmpl.width(),
+        "height": tmpl.height(),
+        "confidence": confidence
+    });
+    ToolOut::Json(payload, false)
+}
+
 // ---------------- lib entry ----------------
 
 pub fn handles(name: &str) -> bool {
-    matches!(name, "computer_inspect_ui" | "computer_snapshot" | "computer_state_fingerprint" | "computer_verify")
+    matches!(name,
+        "computer_inspect_ui" | "computer_snapshot" | "computer_state_fingerprint" | "computer_verify" |
+        "computer_find_element" | "computer_map_ui" | "computer_find_template"
+    )
 }
 
 // accepts: subconjunto de args servible nativo (default true; el puente consulta esto).
-pub fn accepts(_name: &str, _args: &Value) -> bool {
-    true
+pub fn accepts(name: &str, args: &Value) -> bool {
+    match name {
+        "computer_find_element" => {
+            // rama harness remoto si no hay criterios locales
+            let has = args.get("title").is_some() || args.get("hwnd").is_some()
+                || args.get("automation_id").is_some() || args.get("control_type").is_some()
+                || args.get("name").is_some();
+            has
+        }
+        "computer_wait_stable" | "computer_read_selection" | "computer_observe" => false,
+        "computer_find_template" => args.get("template_b64").and_then(|v| v.as_str()).map(|s| !s.trim().is_empty()).unwrap_or(false),
+        _ => true,
+    }
 }
 
 pub fn handle_call(name: &str, args: &Value) -> ToolOut {
@@ -913,6 +1122,9 @@ pub fn handle_call(name: &str, args: &Value) -> ToolOut {
         "computer_snapshot" => handle_snapshot(args),
         "computer_state_fingerprint" => handle_state_fingerprint(args),
         "computer_verify" => handle_verify(args),
+        "computer_find_element" => handle_find_element(args),
+        "computer_map_ui" => handle_map_ui(args),
+        "computer_find_template" => handle_find_template(args),
         _ => ToolOut::Json(json!({"ok": false, "error": "not_implemented"}), true),
     }
 }

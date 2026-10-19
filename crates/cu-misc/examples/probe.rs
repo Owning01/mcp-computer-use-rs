@@ -16,6 +16,9 @@ fn main() {
     show("alert_user", cu_misc::handle_call("computer_alert_user", &json!({"message": "probe test", "duration_ms": 2000, "sound": false})));
     show("calibrate_dpi", cu_misc::handle_call("computer_calibrate_dpi", &json!({})));
     show("audio status", cu_misc::handle_call("computer_audio_action", &json!({"action": "status"})));
+    show("detect_block", cu_misc::handle_call("computer_detect_block", &json!({})));
+    show("pass_barrier", cu_misc::handle_call("computer_pass_barrier", &json!({"strategy": "ask_user", "max_attempts": 1, "timeout_ms": 2000})));
+    show("dismiss_overlay", cu_misc::handle_call("computer_dismiss_overlay", &json!({"max_attempts": 1})));
 
     // audio mute toggle restore: read current, mute then unmute
     if let ToolOut::Json(v, _) = cu_misc::handle_call("computer_audio_action", &json!({"action": "status"})) {

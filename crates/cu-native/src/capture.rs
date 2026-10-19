@@ -36,6 +36,7 @@ pub struct ShotArgs {
     pub screen: i64,
     pub capture: String,
     pub interpolation: String,
+    pub wgc_timeout_ms: i64,
 }
 
 pub struct ShotOk {
@@ -239,6 +240,88 @@ fn round4(v: f64) -> f64 {
     (v * 10000.0).round() / 10000.0
 }
 
+// WGC real (cu-wgc in-process): frame BGRA -> RGBA -> PNG (el origen transcodifica WGC
+// siempre a PNG) + meta WGC. PORT NOTE: sin `samples` del helper C# (solo diagnóstico);
+// non_black_percent propio sobre el frame.
+fn wgc_shot(
+    hwnd: i64,
+    target_width: i64,
+    quality: u8,
+    interp: FilterType,
+    timeout_ms: i64,
+    vs: (i32, i32, i32, i32),
+) -> Result<ShotOk, (String, String)> {
+    let frame = cu_wgc::capture(hwnd, timeout_ms.clamp(500, 60000) as u64)
+        .map_err(|e| (e.clone(), format!("WGC no pudo capturar la ventana: {e}")))?;
+    let cu_wgc::Frame {
+        bgra,
+        width,
+        height,
+    } = frame;
+    let mut rgba = bgra;
+    for px in rgba.chunks_exact_mut(4) {
+        px.swap(0, 2);
+    }
+    let Some(img) = RgbaImage::from_raw(width, height, rgba) else {
+        return Err(("wgc_bad_output".into(), "frame WGC con buffer inesperado".into()));
+    };
+    let ow = img.width();
+    let oh = img.height();
+    let non_black = non_black_percent(&img);
+    let Some((bytes, _is_jpeg_out, w, h, sf, _)) =
+        finalize(&img, target_width, false, quality, interp)
+    else {
+        return Err(("wgc_convert_failed".into(), "no se pudo codificar el frame WGC".into()));
+    };
+    // WGC captura el content area (DWM extended frame bounds), no GetWindowRect.
+    let (sx, sy) = window_content_rect(hwnd);
+    let mut m = base_meta(w, h, ow, oh, sf, "png", sx, sy, vs);
+    m.insert("capture_method".into(), json!("wgc"));
+    m.insert("capture_used".into(), json!("wgc"));
+    m.insert("wgc_non_black_percent".into(), json!(non_black));
+    m.insert("wgc_native_width".into(), json!(ow));
+    m.insert("wgc_native_height".into(), json!(oh));
+    Ok(ShotOk {
+        meta: m,
+        bytes,
+        is_jpeg: false,
+    })
+}
+
+fn non_black_percent(img: &RgbaImage) -> f64 {
+    let total = (img.width() as u64) * (img.height() as u64);
+    if total == 0 {
+        return 0.0;
+    }
+    let mut nb = 0u64;
+    for px in img.pixels() {
+        let [r, g, b, _a] = px.0;
+        if r != 0 || g != 0 || b != 0 {
+            nb += 1;
+        }
+    }
+    ((nb as f64) * 10000.0 / (total as f64)).round() / 100.0
+}
+
+fn window_content_rect(hwnd: i64) -> (i32, i32) {
+    use windows::Win32::Graphics::Dwm::{DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute};
+    let hw = HWND(hwnd as isize as *mut core::ffi::c_void);
+    let mut r = RECT::default();
+    let res = unsafe {
+        DwmGetWindowAttribute(
+            hw,
+            DWMWA_EXTENDED_FRAME_BOUNDS,
+            &mut r as *mut RECT as *mut core::ffi::c_void,
+            std::mem::size_of::<RECT>() as u32,
+        )
+    };
+    if res.is_ok() {
+        (r.left, r.top)
+    } else {
+        (0, 0)
+    }
+}
+
 fn interpolation(value: &str) -> FilterType {
     // map del origen: nearest -> NearestNeighbor; resto (incl. default) -> HighQualityBicubic.
     // PORT NOTE: image crate no tiene "HighQualityBicubic"; CatmullRom es la familia bicubica.
@@ -360,10 +443,13 @@ pub fn screenshot(a: &ShotArgs) -> ShotOut {
                 capture_method: "wgc".into(),
             };
         }
-        return ShotOut::Err {
-            error: "wgc_unavailable".into(),
-            message: "WGC nativo Rust aun no portado (TODO(port) F5); usar capture:'auto' o 'gdi'.".into(),
-            capture_method: "wgc".into(),
+        return match wgc_shot(hwnd, target_width, quality, interp, a.wgc_timeout_ms, vs) {
+            Ok(ok) => ShotOut::Ok(ok),
+            Err((code, msg)) => ShotOut::Err {
+                error: code,
+                message: msg,
+                capture_method: "wgc".into(),
+            },
         };
     }
 
@@ -397,8 +483,17 @@ pub fn screenshot(a: &ShotArgs) -> ShotOut {
 
     let mut wgc_fallback: Option<String> = None;
     if mode == "auto" && hwnd > 0 {
-        // Helper WGC (C#) no existe en el puente Rust: solo se reporta la cadena.
-        wgc_fallback = Some("wgc_unavailable".into());
+        // PrintWindow dio frame negro/uniforme (o fallo): se intenta WGC real antes de caer a GDI.
+        match wgc_shot(hwnd, target_width, quality, interp, a.wgc_timeout_ms, vs) {
+            Ok(mut ok) => {
+                ok.meta
+                    .insert("capture_fallback_from".into(), json!("printwindow"));
+                ok.meta
+                    .insert("capture_fallback_reason".into(), json!("near_uniform_frame"));
+                return ShotOut::Ok(ok);
+            }
+            Err((code, _msg)) => wgc_fallback = Some(code),
+        }
     }
 
     // GDI: rect de ventana (si falla, cae a region/monitor como el origen), region explicita o monitor.

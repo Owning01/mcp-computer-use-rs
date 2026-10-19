@@ -4,6 +4,9 @@ mod alert_user;
 mod audio;
 mod calibrate_dpi;
 mod check_health;
+mod detect_block;
+mod dismiss_overlay;
+mod pass_barrier;
 mod process_tree;
 
 use cu_core::out::ToolOut;
@@ -17,6 +20,9 @@ pub fn handles(name: &str) -> bool {
             | "computer_calibrate_dpi"
             | "computer_alert_user"
             | "computer_audio_action"
+            | "computer_pass_barrier"
+            | "computer_detect_block"
+            | "computer_dismiss_overlay"
     )
 }
 
@@ -47,6 +53,20 @@ pub fn handle_call(name: &str, args: &Value) -> ToolOut {
         }
         "computer_audio_action" => {
             let v = audio::audio_action(args);
+            let err = v.get("ok").and_then(|x| x.as_bool()) != Some(true);
+            ToolOut::Json(v, err)
+        }
+        "computer_pass_barrier" => {
+            let v = pass_barrier::pass_barrier(args);
+            let err = v.get("ok").and_then(|x| x.as_bool()) != Some(true);
+            ToolOut::Json(v, err)
+        }
+        "computer_detect_block" => {
+            let v = detect_block::detect_block(args);
+            ToolOut::Json(v, false)
+        }
+        "computer_dismiss_overlay" => {
+            let v = dismiss_overlay::dismiss_overlay(args);
             let err = v.get("ok").and_then(|x| x.as_bool()) != Some(true);
             ToolOut::Json(v, err)
         }

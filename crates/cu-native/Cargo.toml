@@ -8,4 +8,5 @@ image = { workspace = true }
 md-5 = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+cu-wgc = { workspace = true }
 windows = { workspace = true }

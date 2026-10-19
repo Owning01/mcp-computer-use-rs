@@ -346,6 +346,7 @@ async fn native_screenshot(msg: &Value, stdout: &mut tokio::io::Stdout) -> anyho
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string(),
+        wgc_timeout_ms: ji(args.get("wgc_timeout_ms"), 500, 60000, 3000),
     };
     let etag_req = args.get("etag").and_then(Value::as_str).map(str::to_string);
     let link = args.get("link").and_then(Value::as_bool).unwrap_or(false);
@@ -556,6 +557,7 @@ async fn native_zoom(msg: &Value, stdout: &mut tokio::io::Stdout) -> anyhow::Res
         screen: 0,
         capture: "gdi".to_string(),
         interpolation: if smooth { "bicubic" } else { "nearest" }.to_string(),
+        wgc_timeout_ms: 3000,
     };
 
     let out = tokio::task::spawn_blocking(move || cu_native::capture::screenshot(&shot_args)).await?;
