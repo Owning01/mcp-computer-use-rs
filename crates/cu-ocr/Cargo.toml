@@ -7,4 +7,4 @@ edition.workspace = true
 cu-core = { workspace = true }
 cu-native = { workspace = true }
 serde_json = { workspace = true }
-windows = { workspace = true }
+windows = { workspace = true, features = ["Foundation", "Foundation_Collections", "Globalization", "Graphics_Imaging", "Media_Ocr", "Storage_Streams", "Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_WinRT", "Win32_UI_WindowsAndMessaging"] }

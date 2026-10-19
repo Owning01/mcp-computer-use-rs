@@ -142,6 +142,11 @@ fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
     era * 146_097 + doe - 719_468
 }
 
+/// ISO-8601 desde epoch ms (público para el puente: `expiresAt` del lock).
+pub fn iso_from_ms_pub(ms: i64) -> String {
+    iso_from_ms(ms)
+}
+
 pub(crate) fn iso_from_ms(ms: i64) -> String {
     let secs = ms.div_euclid(1000);
     let millis = ms.rem_euclid(1000);
@@ -160,8 +165,7 @@ pub(crate) fn iso_from_ms(ms: i64) -> String {
     )
 }
 
-pub(crate) fn iso_now() -> String {
-    iso_from_ms(now_ms() as i64)
+pub(crate) fn iso_now() -> String {    iso_from_ms(now_ms() as i64)
 }
 
 // Date.parse tolerante para ISO basico (YYYY-MM-DD[THH:MM[:SS[.fff]][Z|+hh:mm]]).

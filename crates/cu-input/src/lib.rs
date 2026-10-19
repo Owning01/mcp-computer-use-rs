@@ -122,13 +122,12 @@ fn native_key_action(key: &str, action: &str, mods: &[String]) {
                     keybd_event(main_vk, 0, KEYBD_EVENT_FLAGS(0), 0);
                 }
             }
+            // PORT NOTE: en "up" el origen libera los modificadores en orden (no invertido).
             "up" => {
                 if main_vk != 0 {
                     keybd_event(main_vk, 0, KEYEVENTF_KEYUP, 0);
                 }
-                let mut rev = mod_vks.clone();
-                rev.reverse();
-                for &m in &rev {
+                for &m in &mod_vks {
                     keybd_event(m, 0, KEYEVENTF_KEYUP, 0);
                 }
             }
@@ -144,6 +143,18 @@ fn native_key_action(key: &str, action: &str, mods: &[String]) {
                     keybd_event(m, 0, KEYEVENTF_KEYUP, 0);
                 }
             }
+        }
+    }
+    clear_failsafe_modifiers();
+}
+
+// PORT NOTE: origin `Clear-FailsafeModifiers` (index.js ~L395): tras cada nativeKeyAction libera
+// Shift/Ctrl/Alt/Win que estén pulsados según GetAsyncKeyState. Replicado tal cual.
+fn clear_failsafe_modifiers() {
+    for vk in [0x10u8, 0x11, 0x12, 0x5B, 0x5C] {
+        let state = unsafe { GetAsyncKeyState(vk as i32) };
+        if (state as u16) & 0x8000 != 0 {
+            unsafe { keybd_event(vk, 0, KEYEVENTF_KEYUP, 0) };
         }
     }
 }
@@ -613,85 +624,204 @@ fn arg_f64(args: &Value, key: &str) -> Option<f64> {
     }
 }
 
+// Presencia de clave en el sentido del origen (`args.x !== undefined`): null cuenta como presente.
 fn has_arg(args: &Value, key: &str) -> bool {
-    args.get(key).map(|v| !v.is_null()).unwrap_or(false)
+    args.get(key).is_some()
+}
+
+// Enteros JSON dentro del rango de clamp del origen (sin redondeo ni coerción de strings).
+fn int_or_absent(args: &Value, key: &str) -> bool {
+    match args.get(key) {
+        None => true,
+        Some(v) => v.as_i64().map(|n| (-100000..=100000).contains(&n)).unwrap_or(false),
+    }
+}
+
+fn int_present(args: &Value, key: &str) -> bool {
+    args.get(key).and_then(Value::as_i64).map(|n| (-100000..=100000).contains(&n)).unwrap_or(false)
+}
+
+// Flags booleanos: el origen usa `=== true` en human_like/human_jitter; solo acepto bool o ausente.
+fn bool_or_absent(args: &Value, key: &str) -> bool {
+    match args.get(key) {
+        None | Some(Value::Null) => true,
+        Some(Value::Bool(_)) => true,
+        _ => false,
+    }
+}
+
+fn truthy(args: &Value, key: &str) -> bool {
+    cu_core::js::flag_truthy(args.get(key))
+}
+
+// PORT NOTE (P0, opción A): el origen resuelve behavior "auto" (ausente incluido) según ventana,
+// patrones UIA y COMPUTER_USE_BEHAVIOR. No se porta esa política: solo se acepta un behavior
+// explícito "foreground" o "humanized" (resolveBehavior devuelve ese modo sin consultar ventana).
+fn behavior_explicit(args: &Value) -> bool {
+    matches!(args.get("behavior").and_then(Value::as_str), Some("foreground") | Some("humanized"))
+}
+
+// PORT NOTE: origin `HARNESS_MODE = (COMPUTER_USE_MODE || "native").toLowerCase()`; en harness/auto
+// `api()` intenta el shell HTTP antes del camino nativo => proxy.
+fn native_mode_only() -> bool {
+    let m = std::env::var("COMPUTER_USE_MODE").unwrap_or_default().to_lowercase();
+    m.is_empty() || m == "native"
+}
+
+// PORT NOTE: origin `button` pasa por mouseButton() (exacto: right/middle, resto left).
+fn button_ok(args: &Value) -> bool {
+    match args.get("button") {
+        None | Some(Value::Null) => true,
+        Some(Value::String(s)) => matches!(s.as_str(), "left" | "right" | "middle"),
+        _ => false,
+    }
+}
+
+// PORT NOTE: focusWindowHelper lanza app_blocked para gestores de contraseña (BLOCKED_APP_FRAGMENTS
+// de utils/error_recovery.js). Si el target cae ahí, el origen devuelve error => proxy.
+fn target_blocked(args: &Value) -> bool {
+    const BLOCKED: [&str; 7] = ["1password", "bitwarden", "dashlane", "lastpass", "nordpass", "proton pass", "keepass"];
+    match args.get("target_window").and_then(Value::as_str) {
+        Some(t) => {
+            let lower = t.to_lowercase();
+            BLOCKED.iter().any(|f| lower.contains(f))
+        }
+        None => false,
+    }
+}
+
+fn no_snapshot(args: &Value) -> bool {
+    !truthy(args, "snapshot_after")
+}
+
+// Texto que SendInput unicode reproduce igual que SendKeys: sin controles y sin surrogates.
+fn plain_text_ok(s: &str) -> bool {
+    s.chars().all(|c| (c as u32) >= 0x20 && (c as u32) != 0x7f && (c as u32) < 0x10000)
+}
+
+// Celdas bulk: el origen hace [string]$c en PowerShell; acepto solo string, entero o null.
+fn cell_ok(v: &Value) -> bool {
+    matches!(v, Value::String(_) | Value::Null) || v.as_i64().is_some()
 }
 
 pub fn accepts(name: &str, args: &Value) -> bool {
     match name {
-        "computer_hotkey" => args.get("combo").map(|v| !cu_core::js::js_string_of(v).trim().is_empty()).unwrap_or(false),
-        "computer_key" => true,
-        "computer_move" => true,
-        "computer_copy" => true,
-        "computer_paste" => true,
-        "computer_bulk_input" => {
-            let rows_ok = match args.get("rows") {
-                Some(Value::Array(a)) => !a.is_empty(),
+        "computer_hotkey" => match args.get("combo") {
+            Some(Value::String(s)) => {
+                let (key, mods) = parse_hotkey(s.trim());
+                !key.is_empty() || !mods.is_empty()
+            }
+            _ => false,
+        },
+        "computer_key" => {
+            let key_ok = matches!(args.get("key"), Some(Value::String(s)) if !s.is_empty());
+            let action_ok = match args.get("action") {
+                None | Some(Value::Null) => true,
+                Some(Value::String(s)) => matches!(s.as_str(), "tap" | "down" | "up"),
                 _ => false,
             };
-            if !rows_ok { return false; }
-            // target_text sin coords resueltas => proxy (no lo resolvemos nativo).
-            if has_arg(args, "target_text")
-                && !(arg_f64(args, "target_x").is_some() && arg_f64(args, "target_y").is_some())
-            {
-                return false;
+            let mods_ok = match args.get("mods") {
+                None | Some(Value::Null) => true,
+                Some(Value::Array(a)) => a.iter().all(|m| m.is_string()),
+                _ => false,
+            };
+            native_mode_only() && key_ok && action_ok && mods_ok
+        }
+        "computer_move" => native_mode_only() && int_or_absent(args, "x") && int_or_absent(args, "y"),
+        "computer_copy" => !target_blocked(args),
+        "computer_paste" => !target_blocked(args) && no_snapshot(args),
+        "computer_bulk_input" => {
+            let rows_ok = match args.get("rows") {
+                Some(Value::Array(a)) => !a.is_empty() && a.iter().all(|r| match r {
+                    Value::Array(cells) => cells.iter().all(cell_ok),
+                    _ => false,
+                }),
+                _ => false,
+            };
+            if !rows_ok || target_blocked(args) { return false; }
+            if !(int_or_absent(args, "target_x") && int_or_absent(args, "target_y")) { return false; }
+            // origin: `!targetX && !targetY && target_text` resuelve por UIA => proxy.
+            if has_arg(args, "target_text") {
+                let tx = args.get("target_x").and_then(Value::as_i64).unwrap_or(0);
+                let ty = args.get("target_y").and_then(Value::as_i64).unwrap_or(0);
+                if tx == 0 && ty == 0 { return false; }
             }
             true
         }
-        "computer_drag_scroll" => true,
+        "computer_drag_scroll" => {
+            let mode_ok = match args.get("mode") {
+                None | Some(Value::Null) => true,
+                Some(Value::String(_)) => true,
+                _ => false,
+            };
+            let mods_ok = match args.get("modifiers") {
+                None | Some(Value::Null) => true,
+                Some(Value::Array(a)) => a.iter().all(|m| m.is_string()),
+                Some(Value::String(_)) => true,
+                _ => false,
+            };
+            let nums_ok = ["from_x", "from_y", "to_x", "to_y", "steps", "delay_ms", "hold_duration_ms", "scroll_pulses", "scroll_delta"]
+                .iter()
+                .all(|k| int_or_absent(args, k));
+            let release_ok = match args.get("release") {
+                None | Some(Value::Null) | Some(Value::Bool(_)) => true,
+                _ => false,
+            };
+            let button_str_ok = match args.get("button") {
+                None | Some(Value::Null) => true,
+                Some(Value::String(_)) => true,
+                _ => false,
+            };
+            mode_ok && mods_ok && nums_ok && release_ok && button_str_ok && native_mode_only()
+        }
         "computer_click" | "computer_double_click" => {
-            if arg_f64(args, "x").is_none() || arg_f64(args, "y").is_none() { return false; }
-            // subsistemas externos no soportados
+            if !int_present(args, "x") || !int_present(args, "y") { return false; }
+            if !button_ok(args) || !bool_or_absent(args, "human_like") { return false; }
             if has_arg(args, "id") || has_arg(args, "ref") || has_arg(args, "name")
                 || has_arg(args, "automation_id") || has_arg(args, "target_text")
             {
                 return false;
             }
-            // headless no soportado
-            if let Some(b) = args.get("behavior").and_then(Value::as_str) {
-                if b == "headless" { return false; }
-                if !["auto", "foreground", "humanized"].contains(&b) { return false; }
-            }
-            true
+            if target_blocked(args) || !no_snapshot(args) || !native_mode_only() { return false; }
+            // Sin behavior explícito el origen resuelve "auto" => proxy.
+            behavior_explicit(args)
         }
         "computer_human_click" => {
-            if arg_f64(args, "x").is_none() || arg_f64(args, "y").is_none() { return false; }
-            if has_arg(args, "id") { return false; }
-            true
+            if !int_present(args, "x") || !int_present(args, "y") { return false; }
+            if has_arg(args, "id") || !button_ok(args) { return false; }
+            !target_blocked(args)
         }
         "computer_drag" => {
-            if arg_f64(args, "fromX").is_none() || arg_f64(args, "fromY").is_none()
-                || arg_f64(args, "toX").is_none() || arg_f64(args, "toY").is_none()
-            {
-                return false;
-            }
-            if let Some(b) = args.get("behavior").and_then(Value::as_str) {
-                if b == "headless" { return false; }
-                if !["auto", "foreground", "humanized"].contains(&b) { return false; }
-            }
-            true
+            let coords = ["fromX", "fromY", "toX", "toY"].iter().all(|k| int_present(args, k));
+            coords && button_ok(args) && behavior_explicit(args) && native_mode_only()
         }
         "computer_scroll" => {
-            if let Some(b) = args.get("behavior").and_then(Value::as_str) {
-                if b == "headless" { return false; }
-                if !["auto", "foreground", "humanized"].contains(&b) { return false; }
-            }
-            true
+            int_or_absent(args, "x") && int_or_absent(args, "y")
+                && int_or_absent(args, "dy") && int_or_absent(args, "dx")
+                && bool_or_absent(args, "human_like") && behavior_explicit(args) && native_mode_only()
         }
         "computer_type" => {
-            let text_ok = args.get("text").map(|v| !cu_core::js::js_string_of(v).is_empty()).unwrap_or(false)
-                || args.get("secret_b64").and_then(Value::as_str).map(|s| !s.is_empty()).unwrap_or(false);
-            if !text_ok { return false; }
+            let secret_ok = match args.get("secret_b64") {
+                None | Some(Value::Null) => true,
+                Some(Value::String(s)) => base64::engine::general_purpose::STANDARD.decode(s).is_ok(),
+                _ => false,
+            };
+            let plain = if let Some(Value::String(s)) = args.get("secret_b64").filter(|v| truthy_value(v)) {
+                match base64::engine::general_purpose::STANDARD.decode(s) {
+                    Ok(b) => String::from_utf8_lossy(&b).to_string(),
+                    Err(_) => String::new(),
+                }
+            } else {
+                args.get("text").map(cu_core::js::js_string_of).unwrap_or_default()
+            };
+            if plain.is_empty() || !plain_text_ok(&plain) || !secret_ok { return false; }
             if has_arg(args, "id") || has_arg(args, "ref") || has_arg(args, "name")
                 || has_arg(args, "automation_id")
             {
                 return false;
             }
-            if let Some(b) = args.get("behavior").and_then(Value::as_str) {
-                if b == "headless" { return false; }
-                if !["auto", "foreground", "humanized"].contains(&b) { return false; }
-            }
-            true
+            bool_or_absent(args, "human_jitter") && bool_or_absent(args, "human_like")
+                && no_snapshot(args) && behavior_explicit(args) && native_mode_only()
         }
         "computer_fill_form" | "computer_scroll_to_text" | "computer_click_text" | "computer_upload_file" => false,
         "computer_handle_file_dialog" => args.get("file_path").map(|v| !cu_core::js::js_string_of(v).trim().is_empty()).unwrap_or(false),
@@ -699,9 +829,23 @@ pub fn accepts(name: &str, args: &Value) -> bool {
     }
 }
 
+fn truthy_value(v: &Value) -> bool {
+    cu_core::js::js_truthy(v)
+}
+
 // ---------------------------------------------------------------------------
 // RNG simple (no depende de crate externo).
 // ---------------------------------------------------------------------------
+// Math.round de JS: mitad hacia +infinito (-1.5 -> -1).
+fn js_round(v: f64) -> i64 {
+    (v + 0.5).floor() as i64
+}
+
+// [int] de PowerShell / Math.Round de C#: mitad al par (banker's).
+fn ps_int(v: f64) -> i32 {
+    v.round_ties_even() as i32
+}
+
 struct SimpleRng { state: u64 }
 impl SimpleRng {
     fn new(seed: u64) -> Self { Self { state: if seed == 0 { 1 } else { seed } } }
@@ -746,16 +890,15 @@ fn native_human_click(x: i32, y: i32, button: &str, double: bool) -> Value {
     unsafe { let _ = GetCursorPos(&mut pt); }
     let start_x = pt.x;
     let start_y = pt.y;
+    // PORT NOTE: origin [math]::Max(10,[math]::Min(35,[int]($dist/35))) y [int] de PowerShell (redondeo).
     let dist = ((x - start_x) as f64).hypot((y - start_y) as f64);
-    let steps = (dist / 35.0).max(10.0).min(35.0) as i32;
-    let steps = steps.max(10);
+    let steps = ps_int(dist / 35.0).max(10).min(35);
     let mut rng = SimpleRng::new((start_x as u64).wrapping_mul(31).wrapping_add(start_y as u64));
-    let dev = (dist * 0.18).min(100.0) as i32;
-    let dev = dev.max(0);
-    let ctrl1x = start_x + ((x - start_x) as f64 * 0.3) as i32 + rng.range(-dev, dev);
-    let ctrl1y = start_y + ((y - start_y) as f64 * 0.3) as i32 + rng.range(-dev, dev);
-    let ctrl2x = start_x + ((x - start_x) as f64 * 0.7) as i32 + rng.range(-dev, dev);
-    let ctrl2y = start_y + ((y - start_y) as f64 * 0.7) as i32 + rng.range(-dev, dev);
+    let dev = ps_int(dist * 0.18).min(100).max(0);
+    let ctrl1x = start_x as f64 + (x - start_x) as f64 * 0.3 + rng.range(-dev, dev) as f64;
+    let ctrl1y = start_y as f64 + (y - start_y) as f64 * 0.3 + rng.range(-dev, dev) as f64;
+    let ctrl2x = start_x as f64 + (x - start_x) as f64 * 0.7 + rng.range(-dev, dev) as f64;
+    let ctrl2y = start_y as f64 + (y - start_y) as f64 * 0.7 + rng.range(-dev, dev) as f64;
 
     for i in 1..=steps {
         let t = i as f64 / steps as f64;
@@ -764,10 +907,10 @@ fn native_human_click(x: i32, y: i32, button: &str, double: bool) -> Value {
         let uu = u * u;
         let uuu = uu * u;
         let ttt = tt * t;
-        let bx = (uuu * start_x as f64 + 3.0 * uu * t * ctrl1x as f64
-            + 3.0 * u * tt * ctrl2x as f64 + ttt * x as f64) as i32;
-        let by = (uuu * start_y as f64 + 3.0 * uu * t * ctrl1y as f64
-            + 3.0 * u * tt * ctrl2y as f64 + ttt * y as f64) as i32;
+        let bx = ps_int(uuu * start_x as f64 + 3.0 * uu * t * ctrl1x
+            + 3.0 * u * tt * ctrl2x + ttt * x as f64);
+        let by = ps_int(uuu * start_y as f64 + 3.0 * uu * t * ctrl1y
+            + 3.0 * u * tt * ctrl2y + ttt * y as f64);
         unsafe { let _ = SetCursorPos(bx, by); }
         thread::sleep(Duration::from_millis(rng.range(5, 14) as u64));
     }
@@ -830,12 +973,13 @@ fn native_human_scroll(args: &Value) {
     let x = int_arg(args.get("x"), -100000, 100000, 0) as i32;
     let y = int_arg(args.get("y"), -100000, 100000, 0) as i32;
     let total = dy.abs().max(dx.abs()).max(1);
-    let steps = (total / 120).max(1).min(8) as usize;
+    // PORT NOTE: origin Math.ceil(total/120) acotado a [1,8]; reparto con Math.round de JS (mitad hacia +inf).
+    let steps = ((total + 119) / 120).max(1).min(8) as usize;
     let mut rest_y = dy;
     let mut rest_x = dx;
     for i in (1..=steps).rev() {
-        let step_y = rest_y / i as i64;
-        let step_x = rest_x / i as i64;
+        let step_y = js_round(rest_y as f64 / i as f64);
+        let step_x = js_round(rest_x as f64 / i as f64);
         rest_y -= step_y;
         rest_x -= step_x;
         if step_y != 0 || step_x != 0 {
@@ -875,22 +1019,22 @@ fn handle_click(args: &Value, is_double: bool) -> ToolOut {
     if let Some(tw) = args.get("target_window") {
         if !tw.is_null() { unsafe { focus_window(tw) }; }
     }
-    let x = int_arg(args.get("x"), -100000, 100000, 0) as i32;
-    let y = int_arg(args.get("y"), -100000, 100000, 0) as i32;
-    // si no vino x/y explícito (acepts ya lo garantiza), error.
+    // acepts garantiza x,y enteros presentes; sin ellos no hay coordenada.
     if args.get("x").is_none() || args.get("y").is_none() {
         return ToolOut::Json(json!({"ok": false, "error": "x,y or id or ref is required"}), true);
     }
-    let button = args.get("button").map(cu_core::js::js_string_of).unwrap_or_else(|| "left".to_string()).to_lowercase();
-    let button = if button.is_empty() { "left".to_string() } else { button };
-    let humanize = args.get("human_like").map(|v| cu_core::js::js_truthy(v)).unwrap_or(false)
+    let x = int_arg(args.get("x"), -100000, 100000, 0) as i32;
+    let y = int_arg(args.get("y"), -100000, 100000, 0) as i32;
+    let button = args.get("button").and_then(Value::as_str).unwrap_or("left").to_string();
+    let humanize = args.get("human_like") == Some(&Value::Bool(true))
         || args.get("behavior").and_then(Value::as_str) == Some("humanized");
 
     if humanize {
-        let res = native_human_click(x, y, &button, is_double);
+        // PORT NOTE: el origen descarta el retorno de nativeHumanClick; la forma es la de click normal.
+        let _ = native_human_click(x, y, &button, is_double);
         let epoch = cu_core::epoch::bump();
         let action = if is_double { "double_click" } else { "click" };
-        return ToolOut::Json(json!({"ok": true, "action": action, "x": x, "y": y, "behavior": "humanized", "epoch": epoch, "human_click": res}), false);
+        return ToolOut::Json(json!({"ok": true, "action": action, "x": x, "y": y, "behavior": "humanized", "epoch": epoch}), false);
     }
 
     unsafe {
@@ -933,29 +1077,27 @@ fn handle_human_click(args: &Value) -> ToolOut {
     ToolOut::Json(json!({"ok": true, "human_click": res, "epoch": epoch}), false)
 }
 
+// PORT NOTE: el origen no enfoca la ventana en drag/scroll/type (solo click/human_click/copy/paste/bulk).
+// humanize = plan.mode === "humanized" (sin human_like), con behavior explícito.
 fn handle_drag(args: &Value) -> ToolOut {
-    if let Some(tw) = args.get("target_window") {
-        if !tw.is_null() { unsafe { focus_window(tw) }; }
-    }
     let from_x = int_arg(args.get("fromX"), -100000, 100000, 0) as i32;
     let from_y = int_arg(args.get("fromY"), -100000, 100000, 0) as i32;
     let to_x = int_arg(args.get("toX"), -100000, 100000, 0) as i32;
     let to_y = int_arg(args.get("toY"), -100000, 100000, 0) as i32;
-    let button = args.get("button").map(cu_core::js::js_string_of).unwrap_or_else(|| "left".to_string()).to_lowercase();
-    let button = if button.is_empty() { "left".to_string() } else { button };
-    let humanize = args.get("human_like").map(|v| cu_core::js::js_truthy(v)).unwrap_or(false)
-        || args.get("behavior").and_then(Value::as_str) == Some("humanized");
+    let button = args.get("button").and_then(Value::as_str).unwrap_or("left").to_string();
+    let humanize = args.get("behavior").and_then(Value::as_str) == Some("humanized");
 
     if humanize {
         native_human_drag(args);
     } else {
-        // nativeMouseAction drag (8 steps smooth)
+        // PORT NOTE: camino primario del origen = DesktopBridge.exe `mouse drag` (10 pasos,
+        // esperas 40/15/30, truncado de C# (int)). Replicado tal cual.
         let (down, up) = button_flags(&button);
         unsafe {
             let _ = SetCursorPos(from_x, from_y);
             mouse_event(down, 0, 0, 0, 0);
-            thread::sleep(Duration::from_millis(60));
-            let steps = 8i32;
+            thread::sleep(Duration::from_millis(40));
+            let steps = 10i32;
             for i in 1..=steps {
                 let t = i as f64 / steps as f64;
                 let smooth = t * t * (3.0 - 2.0 * t);
@@ -965,7 +1107,7 @@ fn handle_drag(args: &Value) -> ToolOut {
                 thread::sleep(Duration::from_millis(15));
             }
             let _ = SetCursorPos(to_x, to_y);
-            thread::sleep(Duration::from_millis(40));
+            thread::sleep(Duration::from_millis(30));
             mouse_event(up, 0, 0, 0, 0);
         }
     }
@@ -975,21 +1117,18 @@ fn handle_drag(args: &Value) -> ToolOut {
 }
 
 fn handle_scroll(args: &Value) -> ToolOut {
-    if let Some(tw) = args.get("target_window") {
-        if !tw.is_null() { unsafe { focus_window(tw) }; }
-    }
     let x = int_arg(args.get("x"), -100000, 100000, 0) as i32;
     let y = int_arg(args.get("y"), -100000, 100000, 0) as i32;
     let dy = int_arg(args.get("dy"), -100000, 100000, 0);
     let dx = int_arg(args.get("dx"), -100000, 100000, 0);
-    let humanize = args.get("human_like").map(|v| cu_core::js::js_truthy(v)).unwrap_or(false)
-        || args.get("behavior").and_then(Value::as_str) == Some("humanized");
+    let humanize = args.get("behavior").and_then(Value::as_str) == Some("humanized");
 
     if humanize {
         native_human_scroll(args);
     } else {
+        // PORT NOTE: DesktopBridge `mouse scroll` hace SetCursorPos(x,y) siempre (x,y ausentes => 0).
         unsafe {
-            if x != 0 || y != 0 { let _ = SetCursorPos(x, y); }
+            let _ = SetCursorPos(x, y);
             mouse_event(MOUSEEVENTF_WHEEL, 0, 0, dy as i32, 0);
             if dx != 0 {
                 mouse_event(MOUSEEVENTF_HWHEEL, 0, 0, dx as i32, 0);

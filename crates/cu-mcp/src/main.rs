@@ -10,19 +10,22 @@
 use serde_json::{json, Value};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::mpsc;
 
 static SHOT_COUNTER: AtomicU64 = AtomicU64::new(0);
+// Última respuesta emitida por un handler nativo (para registrar incidentes como el
+// origen). Solo se guarda si trae "id" (las notificaciones de progreso no cuentan).
+static LAST_RESULT: Mutex<Option<Value>> = Mutex::new(None);
 
 const ORIGIN_NODE: &str = "node";
 const ORIGIN_SCRIPT: &str = "G:/Proyectos/MCP/computer-use2/src/index.js";
 const ORIGIN_CWD: &str = "G:/Proyectos/MCP/computer-use2";
 // El dispatcher interno (cu-exec) se activa cuando el crate está implementado; mientras
 // tanto computer_batch / computer_macro_replay siguen proxieados al hijo Node.
-const CU_EXEC_READY: bool = false;
+const CU_EXEC_READY: bool = true;
 
 const AGENT_PROFILE_TOOLS: [&str; 12] = [
     "computer_screenshot",
@@ -114,6 +117,24 @@ async fn run() -> anyhow::Result<()> {
                     if v.get("id").and_then(Value::as_i64).is_some_and(|id| id < 0) {
                         continue;
                     }
+                    // Adopta el epoch del hijo: puente e hijo comparten un único contador
+                    // lógico (así el check de expected_epoch no se desincroniza).
+                    if v
+                        .get("id")
+                        .and_then(Value::as_i64)
+                        .map(|id| id >= 0)
+                        .unwrap_or(false)
+                    {
+                        if let Some(text) =
+                            v.pointer("/result/content/0/text").and_then(Value::as_str)
+                        {
+                            if let Ok(payload) = serde_json::from_str::<Value>(text) {
+                                if let Some(ep) = payload.get("epoch").and_then(Value::as_u64) {
+                                    cu_core::epoch::set(ep);
+                                }
+                            }
+                        }
+                    }
                 }
                 if tx.send((Src::Child, l)).await.is_err() {
                     break;
@@ -174,9 +195,36 @@ async fn run() -> anyhow::Result<()> {
                     }
                     "tools/call" => {
                         let name = msg["params"]["name"].as_str().unwrap_or("");
-                        // Grabación de macros: registra TODO tool call (salvo los macro_* y los
-                        // bootstrap internos de id negativo) con args saneados, igual que el
-                        // dispatch del origen. El replay lo ejecuta el hijo sobre el mismo archivo.
+                        let args_value = msg
+                            .get("params")
+                            .and_then(|p| p.get("arguments"))
+                            .cloned()
+                            .unwrap_or_else(|| json!({}));
+                        // 1) Bloqueo de gestores de contraseñas (origen index.js:4463, ANTES del
+                        // hook de macros). El puente lo aplica a lo nativo; el hijo a lo proxeado.
+                        let target_win = args_value
+                            .get("target_window")
+                            .or_else(|| args_value.get("app"))
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                            .trim()
+                            .to_string();
+                        if !target_win.is_empty()
+                            && cu_core::blocked::is_app_blocked(&target_win)
+                        {
+                            let payload = cu_core::blocked::app_blocked_payload(&target_win);
+                            let text = serde_json::to_string(&payload)?;
+                            let resp = json!({"jsonrpc":"2.0","id":msg.get("id").cloned().unwrap_or(Value::Null),"result":{
+                                "content":[{"type":"text","text":text}],
+                                "isError":true
+                            }});
+                            respond_value(&mut stdout, &resp).await?;
+                            continue;
+                        }
+                        // 2) Grabación de macros (origen index.js:4471): registra TODO tool call
+                        // (salvo los macro_* y los bootstrap internos de id negativo) con args
+                        // saneados. PORT NOTE: el origen agrega `__element` a los clicks con
+                        // id/ref (enriquecimiento UIA que vive en el proceso Node).
                         if !name.is_empty()
                             && !name.starts_with("computer_macro_")
                             && msg
@@ -186,12 +234,54 @@ async fn run() -> anyhow::Result<()> {
                                 .unwrap_or(true)
                             && cu_core::macros::is_recording()
                         {
-                            let args_v = msg
-                                .get("params")
-                                .and_then(|p| p.get("arguments"))
-                                .cloned()
-                                .unwrap_or_else(|| json!({}));
-                            cu_core::macros::note_step(name, &args_v);
+                            cu_core::macros::note_step(name, &args_value);
+                        }
+                        // 3) Lock multi-agente para lo que sirve el puente (lo proxeado lo toma
+                        //    el hijo). Mismo plan que el origen (planLock).
+                        let mut lock_owner: Option<String> = None;
+                        let mut lock_scope: Option<String> = None;
+                        let mut heartbeat: Option<tokio::task::JoinHandle<()>> = None;
+                        if bridge_serves_native(name, &args_value) {
+                            if let Some(plan) = cu_core::plan::plan_lock(name, &args_value) {
+                                let acquired = cu_core::lock::acquire(
+                                    Some(&Value::String(plan.scope.clone())),
+                                    name,
+                                    None,
+                                    None,
+                                    None,
+                                );
+                                if acquired.get("ok") != Some(&Value::Bool(true)) {
+                                    let resp = busy_response(&msg, &acquired);
+                                    respond_value(&mut stdout, &resp).await?;
+                                    record_lock_incident(name, &args_value, &acquired);
+                                    continue;
+                                }
+                                lock_scope = Some(plan.scope.clone());
+                                lock_owner = acquired
+                                    .pointer("/owner/id")
+                                    .and_then(Value::as_str)
+                                    .map(|s| s.to_string());
+                                if let Some(owner) = lock_owner.clone() {
+                                    let ttl = cu_core::lock::default_ttl_ms();
+                                    let interval =
+                                        std::cmp::max(2000u64, (ttl.max(1) as u64) / 3);
+                                    heartbeat = Some(tokio::spawn(async move {
+                                        loop {
+                                            tokio::time::sleep(std::time::Duration::from_millis(
+                                                interval,
+                                            ))
+                                            .await;
+                                            let ttl_v = Value::from(ttl);
+                                            cu_core::lock::extend(&owner, Some(&ttl_v), None);
+                                        }
+                                    }));
+                                }
+                            }
+                        }
+                        // El origen registra el incidente de todo tool que falla (isError).
+                        let started = std::time::Instant::now();
+                        if let Ok(mut slot) = LAST_RESULT.lock() {
+                            *slot = None;
                         }
                         if name == "computer_list_windows" {
                             native_list_windows(&msg, &mut stdout).await?;
@@ -249,6 +339,25 @@ async fn run() -> anyhow::Result<()> {
                             respond_value(&mut stdout, &resp).await?;
                         } else {
                             forward(&mut child_in, &line).await?;
+                        }
+                        // 3b) Incidente por error (como recordIncidentSafe del origen).
+                        let last_result = LAST_RESULT.lock().ok().and_then(|s| s.clone());
+                        if let Some(resp) = last_result {
+                            let is_error = resp
+                                .pointer("/result/isError")
+                                .and_then(Value::as_bool)
+                                .unwrap_or(false);
+                            if is_error {
+                                let duration_ms = started.elapsed().as_millis() as i64;
+                                record_native_incident(name, &args_value, &resp, duration_ms);
+                            }
+                        }
+                        // 4) Liberación del lock (el origen libera siempre al terminar).
+                        if let Some(hb) = heartbeat {
+                            hb.abort();
+                        }
+                        if let (Some(owner), Some(scope)) = (lock_owner, lock_scope) {
+                            cu_core::lock::release(Some(&owner), Some(&scope), None);
                         }
                     }
                     _ => {
@@ -566,7 +675,8 @@ async fn native_zoom(msg: &Value, stdout: &mut tokio::io::Stdout) -> anyhow::Res
             respond_value(stdout, &resp).await
         }
         cu_native::capture::ShotOut::Ok(ok) => {
-            let epoch = cu_core::epoch::bump();
+            // PORT NOTE: el origen NO incrementa el epoch en computer_zoom (solo en screenshot).
+            let epoch = cu_core::epoch::current();
             let etag = md5_hex(&ok.bytes);
             let mime = if ok.is_jpeg { "image/jpeg" } else { "image/png" };
             let mut meta = serde_json::Map::new();
@@ -651,7 +761,8 @@ async fn native_clipboard(msg: &Value, stdout: &mut tokio::io::Stdout) -> anyhow
     let r = tokio::task::spawn_blocking(move || cu_native::system::clipboard_set(&text_to_set)).await?;
     match r {
         Ok(()) => {
-            let epoch = cu_core::epoch::bump();
+            // PORT NOTE: el origen NO incrementa el epoch en computer_clipboard.
+            let epoch = cu_core::epoch::current();
             let text = serde_json::to_string(
                 &json!({ "ok": true, "action": "clipboard_set", "epoch": epoch }),
             )?;
@@ -701,6 +812,131 @@ async fn native_lock(msg: &Value, stdout: &mut tokio::io::Stdout) -> anyhow::Res
         "isError":is_error
     }});
     respond_value(stdout, &resp).await
+}
+
+// ¿El puente sirve este tool de forma nativa? (para el lock multi-agente: lo proxeado
+// lo bloquea el propio hijo).
+fn bridge_serves_native(name: &str, args: &Value) -> bool {
+    if matches!(
+        name,
+        "computer_list_windows"
+            | "computer_screenshot"
+            | "computer_zoom"
+            | "computer_screen_info"
+            | "computer_awake"
+            | "computer_active_window"
+            | "computer_clipboard"
+            | "computer_incidents"
+            | "computer_lock"
+            | "computer_macro_record"
+            | "computer_macro_list"
+            | "computer_macro_delete"
+    ) {
+        return true;
+    }
+    if name == "computer_login" {
+        return cu_core::js::flag_truthy(args.get("list_profiles"))
+            || (cu_winops::handles(name) && cu_winops::accepts(name, args));
+    }
+    if CU_EXEC_READY && (name == "computer_batch" || name == "computer_macro_replay") {
+        return true;
+    }
+    (cu_uia::handles(name) && cu_uia::accepts(name, args))
+        || (cu_input::handles(name) && cu_input::accepts(name, args))
+        || (cu_winops::handles(name) && cu_winops::accepts(name, args))
+        || (cu_misc::handles(name) && cu_misc::accepts(name, args))
+        || (cu_shell::handles(name) && cu_shell::accepts(name, args))
+        || (cu_ocr::handles(name) && cu_ocr::accepts(name, args))
+}
+
+// Respuesta de "lock ocupado" (espejo de busyResult del origen).
+fn busy_response(msg: &Value, fail: &Value) -> Value {
+    let owner = fail.get("owner").cloned().unwrap_or_else(|| json!({}));
+    let reason = fail
+        .get("reason")
+        .and_then(Value::as_str)
+        .unwrap_or("busy")
+        .to_string();
+    let where_txt = if reason == "desktop_busy" {
+        "el desktop".to_string()
+    } else {
+        format!(
+            "la ventana ({})",
+            fail.get("blocker_scope")
+                .and_then(Value::as_str)
+                .or_else(|| owner.get("scope").and_then(Value::as_str))
+                .unwrap_or("?")
+        )
+    };
+    let label = owner.get("label").and_then(Value::as_str).unwrap_or("?");
+    let pid = owner
+        .get("pid")
+        .map(|v| v.to_string())
+        .unwrap_or_else(|| "?".to_string());
+    let tool = owner.get("tool").and_then(Value::as_str).unwrap_or("?");
+    let expires_in_ms = fail.get("expires_in_ms").and_then(Value::as_i64).unwrap_or(0);
+    let until = match owner.get("expiresAt") {
+        Some(Value::String(s)) => s.clone(),
+        Some(Value::Number(n)) => n
+            .as_f64()
+            .map(|ms| iso_from_epoch_ms(ms as i64))
+            .unwrap_or_else(|| "?".to_string()),
+        _ => "?".to_string(),
+    };
+    let secs = (expires_in_ms as f64 / 1000.0).ceil() as i64;
+    let message = format!(
+        "Otro agente ({label}, pid {pid}) está usando {where_txt} con '{tool}' hasta {until} (~{secs}s). Reintentá con wait_ms o usá computer_lock {{action:'force', confirm:true}}."
+    );
+    let payload = json!({
+        "ok": false,
+        "code": reason,
+        "error": reason,
+        "owner": fail.get("owner").cloned().unwrap_or(Value::Null),
+        "blocker_scope": fail.get("blocker_scope").cloned().unwrap_or(Value::Null),
+        "expires_in_ms": expires_in_ms,
+        "hint": message,
+        "message": message
+    });
+    json!({"jsonrpc":"2.0","id":msg.get("id").cloned().unwrap_or(Value::Null),"result":{
+        "content":[{"type":"text","text":serde_json::to_string(&payload).unwrap_or_default()}],
+        "structuredContent":payload,
+        "isError":true
+    }})
+}
+
+// ISO-8601 desde epoch ms (para el expiresAt del lock).
+fn iso_from_epoch_ms(ms: i64) -> String {
+    cu_core::incidents::iso_from_ms_pub(ms)
+}
+
+// Registra un incidente por el resultado de un tool nativo (espejo de recordIncidentSafe).
+fn record_native_incident(tool: &str, args: &Value, resp: &Value, duration_ms: i64) {
+    cu_core::incidents::record_incident(cu_core::incidents::IncidentRecord {
+        tool,
+        args,
+        error: None,
+        result: Some(resp),
+        duration_ms: Some(duration_ms as f64),
+        version: "",
+        session_id: None,
+        dir: None,
+    });
+}
+
+// Incidente por lock ocupado (el origen registra el resultado con duración 0).
+fn record_lock_incident(name: &str, args: &Value, fail: &Value) {
+    let text = serde_json::to_string(fail).unwrap_or_default();
+    let payload = json!({"isError": true, "content": [{"type": "text", "text": text}]});
+    cu_core::incidents::record_incident(cu_core::incidents::IncidentRecord {
+        tool: name,
+        args,
+        error: None,
+        result: Some(&payload),
+        duration_ms: Some(0.0),
+        version: "",
+        session_id: None,
+        dir: None,
+    });
 }
 
 // Convierte un ToolOut de error en el "result" que consume cu_core::incidents.
@@ -845,7 +1081,9 @@ async fn native_macros(msg: &Value, stdout: &mut tokio::io::Stdout) -> anyhow::R
 struct SyncChild {
     _child: std::process::Child,
     stdin: std::process::ChildStdin,
-    stdout: std::io::BufReader<std::process::ChildStdout>,
+    // Lector dedicado: las líneas del hijo llegan por un canal con plazo. Una lectura
+    // bloqueada sin timeout puede colgar el puente entero.
+    rx: std::sync::mpsc::Receiver<String>,
     next_id: i64,
 }
 
@@ -865,11 +1103,28 @@ impl SyncChild {
             .stderr(std::process::Stdio::null());
         let mut child = cmd.spawn().map_err(|e| e.to_string())?;
         let stdin = child.stdin.take().ok_or("hijo sin stdin")?;
-        let stdout = std::io::BufReader::new(child.stdout.take().ok_or("hijo sin stdout")?);
+        let stdout = child.stdout.take().ok_or("hijo sin stdout")?;
+        let (tx, rx) = std::sync::mpsc::channel::<String>();
+        std::thread::spawn(move || {
+            use std::io::BufRead;
+            let mut reader = std::io::BufReader::new(stdout);
+            let mut line = String::new();
+            loop {
+                line.clear();
+                match reader.read_line(&mut line) {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {
+                        if tx.send(line.clone()).is_err() {
+                            break;
+                        }
+                    }
+                }
+            }
+        });
         let mut me = SyncChild {
             _child: child,
             stdin,
-            stdout,
+            rx,
             next_id: 1000,
         };
         me.init()?;
@@ -886,17 +1141,11 @@ impl SyncChild {
     }
 
     fn read_message(&mut self) -> Result<Value, String> {
-        use std::io::BufRead;
-        let mut line = String::new();
         loop {
-            line.clear();
-            let n = self
-                .stdout
-                .read_line(&mut line)
+            let line = self
+                .rx
+                .recv_timeout(std::time::Duration::from_secs(60))
                 .map_err(|e| e.to_string())?;
-            if n == 0 {
-                return Err("hijo cerrado".to_string());
-            }
             let t = line.trim();
             if t.is_empty() {
                 continue;
@@ -1007,22 +1256,73 @@ fn native_macro_call(tool: &str, args: &Value) -> Option<(Value, bool)> {
 
 struct BridgeExec {
     child: Arc<std::sync::Mutex<Option<SyncChild>>>,
+    // Progress del replay/batch: el Executor acumula las notificaciones y el handler
+    // las emite antes de la respuesta final (el origen emite una por paso).
+    progress: Arc<std::sync::Mutex<Vec<Value>>>,
+    token: Option<Value>,
+    steps: Arc<AtomicU64>,
 }
 
 impl cu_exec::Executor for BridgeExec {
     fn call(&self, tool: &str, args: &Value) -> Result<(Value, bool), String> {
-        if let Some(res) = native_cluster_call(tool, args) {
-            return Ok(res);
+        let res = if let Some(res) = native_cluster_call(tool, args) {
+            Ok(res)
+        } else if let Some(res) = native_macro_call(tool, args) {
+            Ok(res)
+        } else {
+            let mut guard = self.child.lock().unwrap_or_else(|e| e.into_inner());
+            if guard.is_none() {
+                *guard = Some(SyncChild::spawn()?);
+            }
+            let child = guard.as_mut().ok_or("hijo no disponible")?;
+            child.call(tool, args)
+        };
+        if let Some(tok) = self.token.as_ref() {
+            let step = self.steps.fetch_add(1, Ordering::SeqCst) + 1;
+            let note = json!({"jsonrpc":"2.0","method":"notifications/progress",
+                "params":{"progressToken":tok.clone(),"progress":step,
+                    "message":format!("{tool} (paso {step})")}});
+            if let Ok(mut g) = self.progress.lock() {
+                g.push(note);
+            }
         }
-        if let Some(res) = native_macro_call(tool, args) {
-            return Ok(res);
+        res
+    }
+
+    // Elementos UIA para el healing del replay: los pide al hijo Node (misma
+    // implementación que el origen usa para collectElements).
+    fn collect_elements(&self, target: &Value) -> Vec<Value> {
+        let mut args = serde_json::Map::new();
+        if let Some(h) = target.get("hwnd") {
+            args.insert("hwnd".into(), h.clone());
         }
+        if let Some(t) = target.get("target_window") {
+            args.insert("target_window".into(), t.clone());
+        }
+        args.insert("max_results".into(), json!(300));
+        args.insert("interactive_only".into(), json!(true));
         let mut guard = self.child.lock().unwrap_or_else(|e| e.into_inner());
         if guard.is_none() {
-            *guard = Some(SyncChild::spawn()?);
+            match SyncChild::spawn() {
+                Ok(c) => *guard = Some(c),
+                Err(_) => return Vec::new(),
+            }
         }
-        let child = guard.as_mut().ok_or("hijo no disponible")?;
-        child.call(tool, args)
+        let Some(child) = guard.as_mut() else {
+            return Vec::new();
+        };
+        match child.call("computer_inspect_ui", &Value::Object(args)) {
+            Ok((payload, _)) => payload
+                .get("elements")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default(),
+            Err(_) => Vec::new(),
+        }
+    }
+
+    fn active_window(&self) -> Option<Value> {
+        Some(cu_native::system::active_window())
     }
 }
 
@@ -1030,10 +1330,21 @@ async fn native_exec(msg: &Value, stdout: &mut tokio::io::Stdout) -> anyhow::Res
     let args = msg["params"]["arguments"].clone();
     let id = msg.get("id").cloned().unwrap_or(Value::Null);
     let name = msg["params"]["name"].as_str().unwrap_or("").to_string();
+    let token = msg.pointer("/params/_meta/progressToken").cloned();
+    let progress: Arc<std::sync::Mutex<Vec<Value>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
     let exec = BridgeExec {
         child: exec_child().clone(),
+        progress: progress.clone(),
+        token,
+        steps: Arc::new(AtomicU64::new(0)),
     };
     let out = tokio::task::spawn_blocking(move || cu_exec::handle_call(&name, &args, &exec)).await?;
+    // Las notificaciones de progreso se emiten antes de la respuesta final.
+    if let Ok(notes) = progress.lock() {
+        for note in notes.iter() {
+            respond_raw(stdout, &note.to_string()).await?;
+        }
+    }
     let resp = match out {
         cu_core::out::ToolOut::Json(p, err) => {
             let text = serde_json::to_string(&p)?;
@@ -1121,6 +1432,12 @@ async fn forward(child_in: &mut Option<ChildStdin>, line: &str) -> anyhow::Resul
 }
 
 async fn respond_value(stdout: &mut tokio::io::Stdout, v: &Value) -> anyhow::Result<()> {
+    // Guarda la última respuesta (con id) para el registro de incidentes del origen.
+    if v.get("id").is_some() {
+        if let Ok(mut slot) = LAST_RESULT.lock() {
+            *slot = Some(v.clone());
+        }
+    }
     let s = serde_json::to_string(v)?;
     respond_raw(stdout, &s).await
 }
