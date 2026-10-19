@@ -6,4 +6,4 @@ edition.workspace = true
 [dependencies]
 cu-core = { workspace = true }
 serde_json = { workspace = true }
-windows = { workspace = true }
+windows = { workspace = true, features = ["Win32_System_StationsAndDesktops", "Win32_System_Diagnostics_Debug"] }
