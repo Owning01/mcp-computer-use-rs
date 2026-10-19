@@ -1744,6 +1744,229 @@ fn resolve_process_name(name: &str) -> String {
     String::new()
 }
 
+// ---------------- background_action ----------------
+
+fn is_browser_window(class_name: &str, process_name: &str) -> bool {
+    let cls = class_name.to_lowercase();
+    let proc = process_name.to_lowercase().replace(".exe", "").trim().to_string();
+    if cls.contains("chrome_widgetwin") { return true; }
+    if cls.contains("mozillawindowclass") { return true; }
+    let browsers = ["chrome","msedge","firefox","brave","opera","vivaldi","iexplore","msedgewebview2","electron"];
+    browsers.contains(&proc.as_str())
+}
+
+fn handle_background_action(args: &Value) -> ToolOut {
+    let action = args.get("action").and_then(as_str).unwrap_or("").to_lowercase();
+    let supported = ["invoke","toggle","select","expand","collapse","set_value","focus"];
+    if !supported.contains(&action.as_str()) {
+        return ToolOut::Json(json!({"ok": false, "error": "invalid_action", "message": format!("action debe ser una de: {}", supported.join(", "))}), true);
+    }
+    let hwnd = args.get("hwnd").and_then(as_i64).unwrap_or(0);
+    let target_window = args.get("target_window").and_then(as_str).unwrap_or("").to_string();
+    let win_hwnd = if hwnd > 0 { hwnd } else { foreground_hwnd() };
+
+    // window validity
+    unsafe {
+        use windows::Win32::UI::WindowsAndMessaging::IsWindow;
+        if IsWindow(Some(windows::Win32::Foundation::HWND(win_hwnd as *mut _))).as_bool() == false {
+            return ToolOut::Json(json!({"ok": false, "error": "window_not_found", "message": "no se pudo resolver la ventana objetivo"}), true);
+        }
+    }
+
+    // window info
+    let auto = match create_automation() { Some(a) => a, None => {
+        return ToolOut::Json(json!({"ok": false, "error": "uia_init_failed", "message": "no se pudo resolver la ventana objetivo"}), true);
+    }};
+    let root = match root_element(&auto, win_hwnd, &target_window) { Some(r) => r, None => {
+        return ToolOut::Json(json!({"ok": false, "error": "window_not_found", "message": "no se pudo resolver la ventana objetivo"}), true);
+    }};
+    let class_name = unsafe { root.CurrentClassName().map(bstr_to_string).unwrap_or_default() };
+    let proc_name = {
+        let pid = unsafe { root.CurrentProcessId().unwrap_or(0) as u32 };
+        process_name(pid)
+    };
+    if is_browser_window(&class_name, &proc_name) {
+        return ToolOut::Json(json!({"ok": false, "error": "background_blocked_browser", "message": "contenido web no soporta modo background/headless"}), true);
+    }
+
+    // resolve element by name/automation_id/control_type
+    let name_need = args.get("name").and_then(as_str).unwrap_or("").to_string();
+    let id_need = args.get("automation_id").and_then(as_str).unwrap_or("").to_string();
+    let type_need = args.get("control_type").and_then(as_str).unwrap_or("").to_string();
+    if name_need.is_empty() && id_need.is_empty() && type_need.is_empty() {
+        return ToolOut::Json(json!({"ok": false, "error": "element_not_found", "message": "no se resolvió el elemento: pasá name/automation_id"}), true);
+    }
+    let walker = match unsafe { auto.ControlViewWalker() } { Ok(w) => w, Err(_) => {
+        return ToolOut::Json(json!({"ok": false, "error": "walker_failed", "message": "no se pudo resolver la ventana objetivo"}), true);
+    }};
+    // find
+    fn find(walker: &IUIAutomationTreeWalker, el: &IUIAutomationElement, name_need: &str, id_need: &str, type_need: &str) -> Option<IUIAutomationElement> {
+        unsafe {
+            let c_name = el.CurrentName().map(bstr_to_string).unwrap_or_default();
+            let c_aid = el.CurrentAutomationId().map(bstr_to_string).unwrap_or_default();
+            let c_type = control_type_name(el.CurrentControlType().map(|v| v.0).unwrap_or(0));
+            let name_ok = name_need.is_empty() || c_name.to_lowercase().contains(&name_need.to_lowercase());
+            let id_ok = id_need.is_empty() || c_aid == id_need;
+            let type_ok = type_need.is_empty() || c_type == type_need;
+            if name_ok && id_ok && type_ok && (!name_need.is_empty() || !id_need.is_empty()) {
+                return Some(el.clone());
+            }
+            let mut ch = walker.GetFirstChildElement(el).ok();
+            while let Some(c) = ch {
+                if let Some(f) = find(walker, &c, name_need, id_need, type_need) { return Some(f); }
+                ch = walker.GetNextSiblingElement(&c).ok();
+            }
+            None
+        }
+    }
+    let matched = match find(&walker, &root, &name_need, &id_need, &type_need) { Some(m) => m, None => {
+        return ToolOut::Json(json!({"ok": false, "error": "element_not_found", "message": "no se resolvió el elemento"}), true);
+    }};
+
+    // patterns available
+    let mut avail: Vec<&str> = Vec::new();
+    unsafe {
+        if matched.GetCurrentPattern(UIA_InvokePatternId).is_ok() { avail.push("invoke"); }
+        if matched.GetCurrentPattern(UIA_TogglePatternId).is_ok() { avail.push("toggle"); }
+        if matched.GetCurrentPattern(UIA_SelectionItemPatternId).is_ok() { avail.push("select"); }
+        if matched.GetCurrentPattern(UIA_ExpandCollapsePatternId).is_ok() { avail.push("expand"); }
+        // collapse via expandcollapse too
+        if matched.GetCurrentPattern(UIA_ValuePatternId).is_ok() { avail.push("value"); }
+    }
+    // collapse not in patterns list detection? treat expand as collapse-capable
+    // pick
+    let priority: &[&str] = match action.as_str() {
+        "invoke" => &["invoke","toggle","select","expand","value"],
+        "toggle" => &["toggle","invoke","select"],
+        "select" => &["select","invoke","toggle"],
+        "expand" => &["expand","invoke","toggle"],
+        "collapse" => &["expand"],
+        "set_value" => &["value"],
+        "focus" => &["focus"],
+        _ => &[],
+    };
+    let mut chosen: Option<&str> = None;
+    for p in priority {
+        if avail.contains(p) { chosen = Some(*p); break; }
+    }
+    // focus special
+    if action == "focus" { chosen = Some("focus"); }
+
+    let perform = |pat: &str| -> Result<(), String> {
+        unsafe {
+            match (action.as_str(), pat) {
+                ("invoke"|"toggle"|"select"|"expand", "invoke") => matched.GetCurrentPatternAs::<windows::Win32::UI::Accessibility::IUIAutomationInvokePattern>(UIA_InvokePatternId).and_then(|ip| ip.Invoke()).map_err(|e| e.to_string()),
+                ("toggle", "toggle") | (_, "toggle") => matched.GetCurrentPatternAs::<windows::Win32::UI::Accessibility::IUIAutomationTogglePattern>(UIA_TogglePatternId).and_then(|tp| tp.Toggle()).map_err(|e| e.to_string()),
+                ("select", "select") | (_, "select") => matched.GetCurrentPatternAs::<windows::Win32::UI::Accessibility::IUIAutomationSelectionItemPattern>(UIA_SelectionItemPatternId).and_then(|sp| sp.Select()).map_err(|e| e.to_string()),
+                ("expand", "expand") | ("collapse", "expand") => {
+                    let ep = matched.GetCurrentPatternAs::<windows::Win32::UI::Accessibility::IUIAutomationExpandCollapsePattern>(UIA_ExpandCollapsePatternId).map_err(|e| e.to_string())?;
+                    if action == "collapse" { ep.Collapse().map_err(|e| e.to_string()) } else { ep.Expand().map_err(|e| e.to_string()) }
+                }
+                ("set_value", "value") => {
+                    let vp = matched.GetCurrentPatternAs::<IUIAutomationValuePattern>(UIA_ValuePatternId).map_err(|e| e.to_string())?;
+                    let bstr = windows::core::BSTR::from(args.get("value").and_then(as_str).unwrap_or(""));
+                    vp.SetValue(&bstr).map_err(|e| e.to_string())
+                }
+                ("focus", "focus") => matched.SetFocus().map_err(|e| e.to_string()),
+                _ => Err("pattern_failed".into()),
+            }
+        }
+    };
+    let res = if let Some(pat) = chosen { perform(pat) } else { Err("background_unsupported".into()) };
+
+    if let Err(e) = res {
+        return ToolOut::Json(json!({"ok": false, "error": "background_unsupported", "message": e, "attempts": [{"pattern": chosen.unwrap_or(""), "error": e}]}), true);
+    }
+
+    let epoch = cu_core::epoch::bump();
+    let c_name = unsafe { matched.CurrentName().map(bstr_to_string).unwrap_or_default() };
+    let c_type = unsafe { control_type_name(matched.CurrentControlType().map(|v| v.0).unwrap_or(0)) };
+    let rect = unsafe { matched.CurrentBoundingRectangle().unwrap_or(windows::Win32::Foundation::RECT{left:0,top:0,right:0,bottom:0}) };
+    let payload = json!({
+        "ok": true,
+        "method_used": chosen.unwrap_or("focus"),
+        "element": {"name": c_name, "type": c_type, "automation_id": unsafe { matched.CurrentAutomationId().map(bstr_to_string).unwrap_or_default() }},
+        "window": {"hwnd": win_hwnd, "title": unsafe { root.CurrentName().map(bstr_to_string).unwrap_or_default() }},
+        "epoch": epoch
+    });
+    ToolOut::Json(payload, false)
+}
+
+// ---------------- click_text ----------------
+
+fn handle_click_text(args: &Value) -> ToolOut {
+    let search_needle = args.get("text").and_then(as_str).unwrap_or("").trim().to_string();
+    if search_needle.is_empty() {
+        return ToolOut::Json(json!({"ok": false, "error": "text parameter is required"}), true);
+    }
+    let is_exact = args.get("exact").and_then(as_bool).unwrap_or(false);
+    let is_case_sensitive = args.get("case_sensitive").and_then(as_bool).unwrap_or(false);
+    let occurrence = args.get("occurrence").and_then(as_i64).unwrap_or(1);
+    let offset_x = args.get("offset_x").and_then(as_i64).unwrap_or(0);
+    let offset_y = args.get("offset_y").and_then(as_i64).unwrap_or(0);
+    let hwnd = args.get("hwnd").and_then(as_i64).unwrap_or(0);
+    let target_window = args.get("target_window").and_then(as_str).unwrap_or("").to_string();
+    let hwnd = if hwnd > 0 { hwnd } else { foreground_hwnd() };
+
+    // inspect ui
+    let ins = handle_inspect_ui(&json!({"hwnd": hwnd, "target_window": target_window, "max_results": 50, "name": search_needle}));
+    let mut elements = Vec::new();
+    if let ToolOut::Json(v, _) = &ins {
+        if let Some(arr) = v.get("elements").and_then(|x| x.as_array()) {
+            elements = arr.clone();
+        }
+    }
+    // filter
+    let mut filtered: Vec<Value> = Vec::new();
+    for el in &elements {
+        let el_name = el.get("name").and_then(as_str).unwrap_or("").trim().to_string();
+        let match_ok = if is_exact {
+            if is_case_sensitive { el_name == search_needle } else { el_name.to_lowercase() == search_needle.to_lowercase() }
+        } else {
+            if is_case_sensitive { el_name.contains(&search_needle) } else { el_name.to_lowercase().contains(&search_needle.to_lowercase()) }
+        };
+        if match_ok {
+            let offscreen = el.get("offscreen").and_then(as_bool).unwrap_or(false);
+            let w = el.get("width").and_then(as_i64).unwrap_or(0);
+            let h = el.get("height").and_then(as_i64).unwrap_or(0);
+            if !offscreen && w > 0 && h > 0 {
+                filtered.push(el.clone());
+            }
+        }
+    }
+    if filtered.is_empty() {
+        return ToolOut::Json(json!({"ok": false, "found": false, "text": search_needle, "message": "Text not found on screen via UIA or OCR"}), true);
+    }
+    let idx = if occurrence > 0 { (occurrence - 1) as usize } else { (filtered.len() as i64 + occurrence) as usize };
+    let idx = idx.min(filtered.len().saturating_sub(1));
+    let target_el = &filtered[idx];
+    let mx = target_el.get("x").and_then(as_i64).unwrap_or(0) + target_el.get("width").and_then(as_i64).unwrap_or(0) / 2 + offset_x;
+    let my = target_el.get("y").and_then(as_i64).unwrap_or(0) + target_el.get("height").and_then(as_i64).unwrap_or(0) / 2 + offset_y;
+    let matched_text = target_el.get("name").and_then(as_str).unwrap_or("").to_string();
+
+    // click
+    unsafe {
+        use windows::Win32::UI::WindowsAndMessaging::SetCursorPos;
+        use windows::Win32::UI::Input::KeyboardAndMouse::{mouse_event, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP};
+        SetCursorPos(mx as i32, my as i32);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+        mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+    }
+    let epoch = cu_core::epoch::bump();
+    let payload = json!({
+        "ok": true,
+        "found": true,
+        "source": "uia",
+        "matched_text": matched_text,
+        "click": {"x": mx, "y": my, "button": "left", "double": false, "offset_x": offset_x, "offset_y": offset_y, "human_like": false},
+        "typed": false,
+        "modal_appeared": false,
+        "epoch": epoch
+    });
+    ToolOut::Json(payload, false)
+}
+
 // ---------------- lib entry ----------------
 
 pub fn handles(name: &str) -> bool {
@@ -1751,7 +1974,8 @@ pub fn handles(name: &str) -> bool {
         "computer_inspect_ui" | "computer_snapshot" | "computer_state_fingerprint" | "computer_verify" |
         "computer_find_element" | "computer_map_ui" | "computer_find_template" |
         "computer_ui_action" | "computer_read_selection" | "computer_observe" |
-        "computer_system_tray" | "computer_context_menu" | "computer_toast_action"
+        "computer_system_tray" | "computer_context_menu" | "computer_toast_action" |
+        "computer_background_action" | "computer_click_text"
     )
 }
 
@@ -1771,6 +1995,8 @@ pub fn accepts(name: &str, args: &Value) -> bool {
         "computer_system_tray" => true,
         "computer_context_menu" => args.get("x").is_some() && args.get("y").is_some(),
         "computer_toast_action" => args.get("action").and_then(as_str).unwrap_or("list") == "click_button",
+        "computer_background_action" => true,
+        "computer_click_text" => args.get("text").and_then(as_str).map(|s| !s.trim().is_empty()).unwrap_or(false),
         "computer_find_template" => args.get("template_b64").and_then(|v| v.as_str()).map(|s| !s.trim().is_empty()).unwrap_or(false),
         _ => true,
     }
@@ -1791,6 +2017,8 @@ pub fn handle_call(name: &str, args: &Value) -> ToolOut {
         "computer_system_tray" => handle_system_tray(args),
         "computer_context_menu" => handle_context_menu(args),
         "computer_toast_action" => handle_toast_action(args),
+        "computer_background_action" => handle_background_action(args),
+        "computer_click_text" => handle_click_text(args),
         _ => ToolOut::Json(json!({"ok": false, "error": "not_implemented"}), true),
     }
 }
