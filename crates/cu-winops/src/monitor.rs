@@ -180,6 +180,7 @@ pub fn monitor_screenshot(args: &Value) -> cu_core::out::ToolOut {
         w: target.bounds_w as i64,
         h: target.bounds_h as i64,
         screen: 0,
+        wgc_timeout_ms: 3000,
         capture: "gdi".to_string(),
         interpolation: "lanczos".to_string(),
     };
