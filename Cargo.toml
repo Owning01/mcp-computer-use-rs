@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/cu-core", "crates/cu-mcp", "crates/cu-native", "crates/cu-uia", "crates/cu-input", "crates/cu-winops", "crates/cu-misc", "crates/cu-shell", "crates/cu-wgc"]
+members = ["crates/cu-core", "crates/cu-mcp", "crates/cu-native", "crates/cu-uia", "crates/cu-input", "crates/cu-winops", "crates/cu-misc", "crates/cu-shell", "crates/cu-wgc", "crates/cu-ocr"]
 
 [workspace.package]
 edition = "2024"
@@ -20,6 +20,7 @@ windows = { version = "=0.62.2", features = ["Win32_Foundation", "Win32_UI_Windo
 cu-core = { path = "crates/cu-core" }
 cu-input = { path = "crates/cu-input" }
 cu-misc = { path = "crates/cu-misc" }
+cu-ocr = { path = "crates/cu-ocr" }
 cu-shell = { path = "crates/cu-shell" }
 cu-uia = { path = "crates/cu-uia" }
 cu-wgc = { path = "crates/cu-wgc" }

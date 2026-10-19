@@ -10,6 +10,7 @@ cu-core = { workspace = true }
 cu-input = { workspace = true }
 cu-misc = { workspace = true }
 cu-native = { workspace = true }
+cu-ocr = { workspace = true }
 cu-shell = { workspace = true }
 cu-uia = { workspace = true }
 cu-winops = { workspace = true }

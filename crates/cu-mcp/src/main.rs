@@ -229,6 +229,7 @@ async fn run() -> anyhow::Result<()> {
                                 || (cu_winops::handles(&name) && cu_winops::accepts(&name, cargs))
                                 || (cu_misc::handles(&name) && cu_misc::accepts(&name, cargs))
                                 || (cu_shell::handles(&name) && cu_shell::accepts(&name, cargs))
+                                || (cu_ocr::handles(&name) && cu_ocr::accepts(&name, cargs))
                         } {
                             native_cluster(&name, &msg, &mut stdout).await?;
                         } else if is_request && child_in.is_none() {
@@ -743,6 +744,8 @@ async fn native_cluster(
             cu_winops::handle_call(&name_owned, &args)
         } else if cu_shell::handles(&name_owned) && cu_shell::accepts(&name_owned, &args) {
             cu_shell::handle_call(&name_owned, &args)
+        } else if cu_ocr::handles(&name_owned) && cu_ocr::accepts(&name_owned, &args) {
+            cu_ocr::handle_call(&name_owned, &args)
         } else {
             cu_misc::handle_call(&name_owned, &args)
         }

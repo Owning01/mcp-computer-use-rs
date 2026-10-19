@@ -213,6 +213,7 @@ dependencies = [
  "cu-input",
  "cu-misc",
  "cu-native",
+ "cu-ocr",
  "cu-shell",
  "cu-uia",
  "cu-winops",
@@ -324,6 +325,16 @@ dependencies = [
  "image",
  "md-5",
  "serde",
+ "serde_json",
+ "windows",
+]
+
+[[package]]
+name = "cu-ocr"
+version = "0.1.0"
+dependencies = [
+ "cu-core",
+ "cu-native",
  "serde_json",
  "windows",
 ]
