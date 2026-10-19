@@ -12,13 +12,16 @@
 // Reglas: migration/RULEBOOK.md (ver enmienda: puente crudo por paridad byte-exacta).
 use serde_json::{json, Value};
 use std::process::Stdio;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::mpsc;
 
 static SHOT_COUNTER: AtomicU64 = AtomicU64::new(0);
+// Hijo Node: pid (para el watchdog de inactividad) y última vez que se usó.
+static CHILD_PID: AtomicU32 = AtomicU32::new(0);
+static CHILD_LAST_USE: AtomicU64 = AtomicU64::new(0);
 // Última respuesta emitida por un handler nativo (para registrar incidentes como el
 // origen). Solo se guarda si trae "id" (las notificaciones de progreso no cuentan).
 static LAST_RESULT: Mutex<Option<Value>> = Mutex::new(None);
@@ -82,14 +85,11 @@ async fn run() -> anyhow::Result<()> {
     let disable_child = std::env::var("PARITY_DISABLE_CHILD")
         .map(|v| v == "1")
         .unwrap_or(false);
-    let (mut child, mut child_in, child_out) = if disable_child {
-        tracing::warn!("PARITY_DISABLE_CHILD=1: modo only-native");
-        (None, None, None)
-    } else {
-        let (c, mut ci, co) = spawn_origin()?;
-        bootstrap_child(&mut ci).await?;
-        (c, ci, co)
-    };
+    // El hijo Node se arranca LAZÍ: solo hace falta para lo que el puente no sirve de
+    // forma nativa. Una sesión que use únicamente tools nativos no paga los ~65 MB del
+    // proceso Node. Si pasa un rato sin uso, el watchdog lo mata (ver más abajo).
+    let mut child: Option<Child> = None;
+    let mut child_in: Option<ChildStdin> = None;
 
     let (tx, mut rx) = mpsc::channel::<(Src, String)>(256);
 
@@ -110,40 +110,32 @@ async fn run() -> anyhow::Result<()> {
             let _ = tx.send((Src::Client, "\u{0}EOF".to_string())).await;
         });
     }
-    if let Some(out) = child_out {
-        let tx = tx.clone();
-        tokio::spawn(async move {
-            let mut lines: Lines<BufReader<ChildStdout>> = out;
-            while let Ok(Some(l)) = lines.next_line().await {
-                // Las respuestas del bootstrap interno (id negativo) no se reenvian al cliente.
-                if let Ok(v) = serde_json::from_str::<Value>(&l) {
-                    if v.get("id").and_then(Value::as_i64).is_some_and(|id| id < 0) {
+    // Watchdog de inactividad: si el hijo Node lleva rato sin uso, se lo mata (y a su
+    // árbol) para liberar RAM de las sesiones ociosas. Se rearma en la próxima llamada
+    // proxieada. 0 = desactivado.
+    {
+        let idle_ms = std::env::var("COMPUTER_USE_CHILD_IDLE_MS")
+            .ok()
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .unwrap_or(600_000);
+        if idle_ms > 0 && !disable_child {
+            tokio::spawn(async move {
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                    let pid = CHILD_PID.load(Ordering::SeqCst);
+                    if pid == 0 {
                         continue;
                     }
-                    // Adopta el epoch del hijo: puente e hijo comparten un único contador
-                    // lógico (así el check de expected_epoch no se desincroniza).
-                    if v
-                        .get("id")
-                        .and_then(Value::as_i64)
-                        .map(|id| id >= 0)
-                        .unwrap_or(false)
-                    {
-                        if let Some(text) =
-                            v.pointer("/result/content/0/text").and_then(Value::as_str)
-                        {
-                            if let Ok(payload) = serde_json::from_str::<Value>(text) {
-                                if let Some(ep) = payload.get("epoch").and_then(Value::as_u64) {
-                                    cu_core::epoch::adopt(ep);
-                                }
-                            }
-                        }
+                    let last = CHILD_LAST_USE.load(Ordering::SeqCst);
+                    if last == 0 || now_ms_u64().saturating_sub(last) <= idle_ms {
+                        continue;
                     }
+                    tracing::info!(pid, idle_ms, "hijo Node ocioso: se mata para liberar RAM");
+                    kill_child_tree_pid(pid);
+                    CHILD_PID.store(0, Ordering::SeqCst);
                 }
-                if tx.send((Src::Child, l)).await.is_err() {
-                    break;
-                }
-            }
-        });
+            });
+        }
     }
 
     let mut stdout = tokio::io::stdout();
@@ -355,7 +347,7 @@ async fn run() -> anyhow::Result<()> {
                                 || (cu_ocr::handles(&name) && cu_ocr::accepts(&name, cargs))
                         } {
                             native_cluster(&name, &msg, &mut stdout).await?;
-                        } else if is_request && child_in.is_none() {
+                        } else if is_request && disable_child {
                             let resp = json!({
                                 "jsonrpc": "2.0",
                                 "id": msg.get("id").cloned().unwrap_or(Value::Null),
@@ -363,7 +355,7 @@ async fn run() -> anyhow::Result<()> {
                             });
                             respond_value(&mut stdout, &resp).await?;
                         } else {
-                            forward(&mut child_in, &line).await?;
+                            forward_to_child(&mut child, &mut child_in, &tx, &line).await?;
                         }
                         // 3b) Incidente por error (como recordIncidentSafe del origen).
                         let last_result = LAST_RESULT.lock().ok().and_then(|s| s.clone());
@@ -380,7 +372,7 @@ async fn run() -> anyhow::Result<()> {
                         // El lock se libera solo: el guard (LockGuard) lo hace al salir del brazo.
                     }
                     _ => {
-                        if is_request && child_in.is_none() {
+                        if is_request && disable_child {
                             let resp = json!({
                                 "jsonrpc": "2.0",
                                 "id": msg.get("id").cloned().unwrap_or(Value::Null),
@@ -388,7 +380,7 @@ async fn run() -> anyhow::Result<()> {
                             });
                             respond_value(&mut stdout, &resp).await?;
                         } else {
-                            forward(&mut child_in, &line).await?;
+                            forward_to_child(&mut child, &mut child_in, &tx, &line).await?;
                         }
                     }
                 }
@@ -396,9 +388,8 @@ async fn run() -> anyhow::Result<()> {
         }
     }
 
-    if let Some(mut c) = child.take() {
-        let _ = c.kill().await;
-    }
+    // Se mata el árbol entero (el hijo puede dejar daemons de PowerShell colgando).
+    kill_child_tree(child.take()).await;
     Ok(())
 }
 
@@ -1455,8 +1446,122 @@ async fn bootstrap_child(child_in: &mut Option<ChildStdin>) -> anyhow::Result<()
     Ok(())
 }
 
+// --- Ciclo de vida del hijo Node (arranque lazy + watchdog de inactividad) --------
+
+// Lector del hijo Node: reenvía sus líneas al loop principal y descarta las respuestas
+// internas del bootstrap (id negativo). Adopta el epoch del hijo.
+fn spawn_child_reader(tx: mpsc::Sender<(Src, String)>, out: Lines<BufReader<ChildStdout>>) {
+    tokio::spawn(async move {
+        let mut lines: Lines<BufReader<ChildStdout>> = out;
+        while let Ok(Some(l)) = lines.next_line().await {
+            // Las respuestas del bootstrap interno (id negativo) no se reenvian al cliente.
+            if let Ok(v) = serde_json::from_str::<Value>(&l) {
+                if v.get("id").and_then(Value::as_i64).is_some_and(|id| id < 0) {
+                    continue;
+                }
+                // Adopta el epoch del hijo: puente e hijo comparten un único contador
+                // lógico (así el check de expected_epoch no se desincroniza).
+                if v
+                    .get("id")
+                    .and_then(Value::as_i64)
+                    .map(|id| id >= 0)
+                    .unwrap_or(false)
+                {
+                    if let Some(text) = v.pointer("/result/content/0/text").and_then(Value::as_str) {
+                        if let Ok(payload) = serde_json::from_str::<Value>(text) {
+                            if let Some(ep) = payload.get("epoch").and_then(Value::as_u64) {
+                                cu_core::epoch::adopt(ep);
+                            }
+                        }
+                    }
+                }
+            }
+            if tx.send((Src::Child, l)).await.is_err() {
+                break;
+            }
+        }
+    });
+}
+
+// Arranca (o rearma) el hijo Node bajo demanda.
+async fn ensure_child(
+    child: &mut Option<Child>,
+    child_in: &mut Option<ChildStdin>,
+    tx: &mpsc::Sender<(Src, String)>,
+) -> anyhow::Result<()> {
+    if child_in.is_some() {
+        return Ok(());
+    }
+    let (c, mut ci, co) = spawn_origin()?;
+    bootstrap_child(&mut ci).await?;
+    if let Some(out) = co {
+        spawn_child_reader(tx.clone(), out);
+    }
+    CHILD_PID.store(
+        c.as_ref().and_then(|proc| proc.id()).unwrap_or(0),
+        Ordering::SeqCst,
+    );
+    CHILD_LAST_USE.store(now_ms_u64(), Ordering::SeqCst);
+    *child = c;
+    *child_in = ci;
+    Ok(())
+}
+
+// Reenvía una línea al hijo. Si el hijo está muerto, lo rearma y reintenta una vez.
+async fn forward_to_child(
+    child: &mut Option<Child>,
+    child_in: &mut Option<ChildStdin>,
+    tx: &mpsc::Sender<(Src, String)>,
+    line: &str,
+) -> anyhow::Result<()> {
+    if child_in.is_none() {
+        ensure_child(child, child_in, tx).await?;
+    }
+    match forward(child_in, line).await {
+        Ok(()) => {
+            CHILD_LAST_USE.store(now_ms_u64(), Ordering::SeqCst);
+            Ok(())
+        }
+        Err(e) => {
+            tracing::warn!("hijo Node caído ({e}): se rearma y se reintenta");
+            kill_child_tree(child.take()).await;
+            *child_in = None;
+            CHILD_PID.store(0, Ordering::SeqCst);
+            ensure_child(child, child_in, tx).await?;
+            forward(child_in, line).await?;
+            CHILD_LAST_USE.store(now_ms_u64(), Ordering::SeqCst);
+            Ok(())
+        }
+    }
+}
+
+// Mata el proceso y su árbol (taskkill /T) para no dejar daemons huérfanos.
+async fn kill_child_tree(child: Option<Child>) {
+    if let Some(mut c) = child {
+        if let Some(pid) = c.id() {
+            kill_child_tree_pid(pid);
+        }
+        let _ = c.kill().await;
+    }
+}
+
+fn kill_child_tree_pid(pid: u32) {
+    let _ = std::process::Command::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/T", "/F"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+}
+
+fn now_ms_u64() -> u64 {
+    now_ms() as u64
+}
+
 fn spawn_origin() -> anyhow::Result<(Option<Child>, Option<ChildStdin>, Option<Lines<BufReader<ChildStdout>>>)> {
     let mut cmd = Command::new(ORIGIN_NODE);
+    // V8: semi-espacio chico = menos RSS por proceso (el origen no necesita un young
+    // generation grande). Es un hint de tamaño, no un límite duro: no puede tirar OOM.
+    cmd.arg("--max-semi-space-size=4");
     cmd.arg(ORIGIN_SCRIPT)
         .current_dir(ORIGIN_CWD)
         .stdin(Stdio::piped())
