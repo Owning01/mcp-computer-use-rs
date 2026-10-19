@@ -724,12 +724,37 @@ fn macro_pending_take(id_key: &str) -> Option<String> {
         .remove(id_key)
 }
 
+// Convierte un ToolOut de error en el "result" que consume cu_core::incidents.
+fn cluster_error_result(out: &cu_core::out::ToolOut) -> Option<Value> {
+    let payload = match out {
+        cu_core::out::ToolOut::Json(p, err) | cu_core::out::ToolOut::JsonStructured(p, err) => {
+            if !err {
+                return None;
+            }
+            p.clone()
+        }
+        cu_core::out::ToolOut::Raw(s, err) => {
+            if !err {
+                return None;
+            }
+            Value::String(s.clone())
+        }
+        cu_core::out::ToolOut::Image { .. } | cu_core::out::ToolOut::Link { .. } => return None,
+    };
+    let text = match &payload {
+        Value::String(s) => s.clone(),
+        other => serde_json::to_string(other).unwrap_or_default(),
+    };
+    Some(json!({"isError": true, "content": [{"type": "text", "text": text}]}))
+}
+
 async fn native_cluster(
     name: &str,
     msg: &Value,
     stdout: &mut tokio::io::Stdout,
 ) -> anyhow::Result<()> {
     let args = msg["params"]["arguments"].clone();
+    let args_rec = args.clone();
     let id = msg.get("id").cloned().unwrap_or(Value::Null);
     let name_owned = name.to_string();
     let out = tokio::task::spawn_blocking(move || {
@@ -746,6 +771,20 @@ async fn native_cluster(
         }
     })
     .await?;
+    // Incidents: los errores de clusters nativos se registran en el puente (igual que el
+    // dispatch del origen); cuando la llamada se proxea, la registra el hijo.
+    if let Some(result_v) = cluster_error_result(&out) {
+        cu_core::incidents::record_incident(cu_core::incidents::IncidentRecord {
+            tool: name,
+            args: &args_rec,
+            error: None,
+            result: Some(&result_v),
+            duration_ms: None,
+            version: "",
+            session_id: None,
+            dir: None,
+        });
+    }
     let resp = match out {
         cu_core::out::ToolOut::Json(p, err) => {
             let text = serde_json::to_string(&p)?;
