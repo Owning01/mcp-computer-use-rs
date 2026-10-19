@@ -175,6 +175,12 @@ async fn run() -> anyhow::Result<()> {
                             native_list_windows(&msg, &mut stdout).await?;
                         } else if name == "computer_screenshot" {
                             native_screenshot(&msg, &mut stdout).await?;
+                        } else if name == "computer_zoom" {
+                            native_zoom(&msg, &mut stdout).await?;
+                        } else if name == "computer_screen_info" {
+                            native_screen_info(&msg, &mut stdout).await?;
+                        } else if name == "computer_awake" {
+                            native_awake(&msg, &mut stdout).await?;
                         } else if is_request && child_in.is_none() {
                             let resp = json!({
                                 "jsonrpc": "2.0",
@@ -274,6 +280,11 @@ async fn native_screenshot(msg: &Value, stdout: &mut tokio::io::Stdout) -> anyho
             .and_then(Value::as_str)
             .unwrap_or("auto")
             .to_string(),
+        interpolation: args
+            .get("interpolation")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
     };
     let etag_req = args.get("etag").and_then(Value::as_str).map(str::to_string);
     let link = args.get("link").and_then(Value::as_bool).unwrap_or(false);
@@ -355,6 +366,183 @@ async fn native_screenshot(msg: &Value, stdout: &mut tokio::io::Stdout) -> anyho
                 return respond_value(stdout, &resp).await;
             }
 
+            let b64 = {
+                use base64::Engine;
+                base64::engine::general_purpose::STANDARD.encode(&ok.bytes)
+            };
+            let text = serde_json::to_string(&Value::Object(meta))?;
+            let resp = json!({"jsonrpc":"2.0","id":id,"result":{"content":[
+                {"type":"image","data":b64,"mimeType":mime},
+                {"type":"text","text":text}
+            ]}});
+            respond_value(stdout, &resp).await
+        }
+    }
+}
+
+fn clamp_scale(v: Option<&Value>) -> f64 {
+    let n = match v {
+        Some(Value::Number(n)) => n.as_f64(),
+        Some(Value::String(s)) => s.trim().parse::<f64>().ok(),
+        _ => None,
+    };
+    match n {
+        Some(f) if f.is_finite() => f.clamp(1.0, 4.0),
+        _ => 2.0,
+    }
+}
+
+struct AwakeState {
+    enabled: bool,
+    mode: String,
+    since: Option<u128>,
+    reason: String,
+}
+
+static AWAKE: std::sync::Mutex<AwakeState> = std::sync::Mutex::new(AwakeState {
+    enabled: false,
+    mode: String::new(),
+    since: None,
+    reason: String::new(),
+});
+
+async fn native_screen_info(msg: &Value, stdout: &mut tokio::io::Stdout) -> anyhow::Result<()> {
+    let id = msg.get("id").cloned().unwrap_or(Value::Null);
+    let info = tokio::task::spawn_blocking(cu_native::screen::screen_info).await?;
+    let text = serde_json::to_string(&info)?;
+    let resp = json!({"jsonrpc":"2.0","id":id,"result":{"content":[{"type":"text","text":text}]}});
+    respond_value(stdout, &resp).await
+}
+
+async fn native_awake(msg: &Value, stdout: &mut tokio::io::Stdout) -> anyhow::Result<()> {
+    let args = msg["params"]["arguments"].clone();
+    let enabled = match args.get("enabled") {
+        Some(Value::Bool(b)) => *b,
+        Some(Value::Number(n)) => n.as_f64().unwrap_or(0.0) != 0.0,
+        Some(Value::String(s)) => !s.is_empty(),
+        _ => false,
+    };
+    let mode = if args.get("mode").and_then(Value::as_str) == Some("system") {
+        "system"
+    } else {
+        "display"
+    };
+    let reason = args.get("reason").and_then(Value::as_str).unwrap_or("").to_string();
+    let display = mode == "display";
+    let ok = tokio::task::spawn_blocking(move || cu_native::set_keep_awake(enabled, display))
+        .await
+        .unwrap_or(false);
+    let (awake, mode_out, message) = {
+        let mut st = AWAKE.lock().unwrap_or_else(|e| e.into_inner());
+        if ok {
+            st.enabled = enabled;
+            st.mode = if enabled { mode.to_string() } else { "none".into() };
+            st.since = if enabled { Some(now_ms()) } else { None };
+            st.reason = if enabled {
+                if reason.is_empty() {
+                    "agent_task".into()
+                } else {
+                    reason.clone()
+                }
+            } else {
+                String::new()
+            };
+            let msg_out = if enabled {
+                format!("Desktop keep-awake active (mode: {mode}, display sleep prevented)")
+            } else {
+                "Desktop keep-awake released (normal Windows power management restored)".to_string()
+            };
+            (enabled, st.mode.clone(), msg_out)
+        } else {
+            (
+                st.enabled,
+                st.mode.clone(),
+                "Failed to set execution state: SetThreadExecutionState returned 0".to_string(),
+            )
+        }
+    };
+    let text = serde_json::to_string(
+        &json!({ "ok": ok, "awake": awake, "mode": mode_out, "message": message }),
+    )?;
+    let resp = json!({"jsonrpc":"2.0","id": msg.get("id").cloned().unwrap_or(Value::Null),
+        "result":{"content":[{"type":"text","text":text}],"isError":!ok}});
+    respond_value(stdout, &resp).await
+}
+
+async fn native_zoom(msg: &Value, stdout: &mut tokio::io::Stdout) -> anyhow::Result<()> {
+    let args = msg["params"]["arguments"].clone();
+    let id = msg.get("id").cloned().unwrap_or(Value::Null);
+    let zx = ji(args.get("x"), -1000000, 1000000, 0);
+    let zy = ji(args.get("y"), -1000000, 1000000, 0);
+    let zw = ji(args.get("w"), 1, 100000, 200);
+    let zh = ji(args.get("h"), 1, 100000, 150);
+    let scale = clamp_scale(args.get("scale"));
+    let smooth = args.get("smooth").and_then(Value::as_bool).unwrap_or(false);
+    let jpeg = args.get("format").and_then(Value::as_str) == Some("jpeg");
+    let quality = ji(args.get("quality"), 10, 95, 90);
+    let out_w = ((zw as f64) * scale).round().max(1.0) as i64;
+    let out_h = ((zh as f64) * scale).round().max(1.0) as i64;
+    let link = args.get("link").and_then(Value::as_bool).unwrap_or(false);
+
+    let shot_args = cu_native::capture::ShotArgs {
+        width: out_w,
+        format: if jpeg { "jpeg" } else { "png" }.to_string(),
+        quality,
+        hwnd: 0,
+        x: zx,
+        y: zy,
+        w: zw,
+        h: zh,
+        screen: 0,
+        capture: "gdi".to_string(),
+        interpolation: if smooth { "bicubic" } else { "nearest" }.to_string(),
+    };
+
+    let out = tokio::task::spawn_blocking(move || cu_native::capture::screenshot(&shot_args)).await?;
+    match out {
+        cu_native::capture::ShotOut::Err { error, message, .. } => {
+            let text = serde_json::to_string(&json!({ "ok": false, "error": error, "message": message }))?;
+            let resp = json!({"jsonrpc":"2.0","id":id,"result":{"content":[{"type":"text","text":text}],"isError":true}});
+            respond_value(stdout, &resp).await
+        }
+        cu_native::capture::ShotOut::Ok(ok) => {
+            let epoch = EPOCH.fetch_add(1, Ordering::SeqCst) + 1;
+            let etag = md5_hex(&ok.bytes);
+            let mime = if ok.is_jpeg { "image/jpeg" } else { "image/png" };
+            let mut meta = serde_json::Map::new();
+            let geti = |k: &str| ok.meta.get(k).cloned().unwrap_or(Value::Null);
+            meta.insert("ok".into(), json!(true));
+            meta.insert(
+                "region".into(),
+                json!({ "x": geti("screen_x"), "y": geti("screen_y"), "w": geti("original_width"), "h": geti("original_height") }),
+            );
+            meta.insert("scale".into(), json!(scale));
+            meta.insert("smooth".into(), json!(smooth));
+            meta.insert("width".into(), json!(ok.meta.get("width").cloned().unwrap_or(Value::Null)));
+            meta.insert("height".into(), json!(ok.meta.get("height").cloned().unwrap_or(Value::Null)));
+            meta.insert("native_width".into(), json!(ok.meta.get("original_width").cloned().unwrap_or(Value::Null)));
+            meta.insert("native_height".into(), json!(ok.meta.get("original_height").cloned().unwrap_or(Value::Null)));
+            meta.insert("format".into(), json!(if ok.is_jpeg { "jpeg" } else { "png" }));
+            meta.insert("etag".into(), json!(etag));
+            meta.insert("epoch".into(), json!(epoch));
+            meta.insert(
+                "nota".into(),
+                json!("las coordenadas del modelo siguen siendo físicas; el pixel central de la imagen ampliada corresponde a region.x + dx/scale (dx=columna en la imagen escalada)"),
+            );
+
+            if link {
+                let (path_str, uri, name) = save_shot(&ok.bytes, ok.is_jpeg)?;
+                meta.insert("path".into(), json!(path_str));
+                meta.insert("mime".into(), json!(mime));
+                let n = ok.bytes.len() as i64;
+                meta.insert("bytes".into(), json!((n + 2) / 3 * 3));
+                let text = serde_json::to_string(&Value::Object(meta))?;
+                let resp = json!({"jsonrpc":"2.0","id":id,"result":{"content":[
+                    {"type":"text","text":text},
+                    {"type":"resource_link","uri":uri,"name":name,"mimeType":mime}
+                ]}});
+                return respond_value(stdout, &resp).await;
+            }
             let b64 = {
                 use base64::Engine;
                 base64::engine::general_purpose::STANDARD.encode(&ok.bytes)

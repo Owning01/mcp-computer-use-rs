@@ -35,6 +35,7 @@ pub struct ShotArgs {
     pub h: i64,
     pub screen: i64,
     pub capture: String,
+    pub interpolation: String,
 }
 
 pub struct ShotOk {
@@ -238,11 +239,13 @@ fn round4(v: f64) -> f64 {
     (v * 10000.0).round() / 10000.0
 }
 
-fn interpolation(capture: &str) -> FilterType {
-    // map del origen: nearest -> NearestNeighbor; resto (incl. default) -> HighQualityBicubic
+fn interpolation(value: &str) -> FilterType {
+    // map del origen: nearest -> NearestNeighbor; resto (incl. default) -> HighQualityBicubic.
     // PORT NOTE: image crate no tiene "HighQualityBicubic"; CatmullRom es la familia bicubica.
-    let _ = capture;
-    FilterType::CatmullRom
+    match value.to_lowercase().as_str() {
+        "nearest" => FilterType::Nearest,
+        _ => FilterType::CatmullRom,
+    }
 }
 
 // finalize del origen: PNG con downscale adaptativo si supera 900KB, luego (si jpeg) transcodifica.
@@ -347,7 +350,7 @@ pub fn screenshot(a: &ShotArgs) -> ShotOut {
 
     let (meta_rects, primary) = monitors();
     let vs = virtual_screen(&meta_rects);
-    let interp = interpolation(&a.capture);
+    let interp = interpolation(&a.interpolation);
 
     if mode == "wgc" {
         if hwnd <= 0 {

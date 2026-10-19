@@ -1,7 +1,24 @@
-// cu-native — primitivas Win32 nativas (F4/F5: list_windows, capture).
+// cu-native — primitivas Win32 nativas (F4/F5/F6: list_windows, capture, screen).
 // Reemplaza las implementaciones PowerShell/C# del origen. Reglas: migration/RULEBOOK.md.
 pub mod capture;
+pub mod screen;
 use serde::Serialize;
+
+/// SetThreadExecutionState (computer_awake). Devuelve false si Win32 falla.
+pub fn set_keep_awake(enabled: bool, display: bool) -> bool {
+    use windows::Win32::System::Power::{
+        ES_CONTINUOUS, ES_DISPLAY_REQUIRED, ES_SYSTEM_REQUIRED, EXECUTION_STATE,
+        SetThreadExecutionState,
+    };
+    let mut flags = ES_CONTINUOUS.0;
+    if enabled {
+        flags |= ES_SYSTEM_REQUIRED.0;
+        if display {
+            flags |= ES_DISPLAY_REQUIRED.0;
+        }
+    }
+    unsafe { SetThreadExecutionState(EXECUTION_STATE(flags)).0 != 0 }
+}
 use windows::core::BOOL;
 use windows::Win32::Foundation::{HWND, LPARAM, RECT};
 use windows::Win32::UI::WindowsAndMessaging::{

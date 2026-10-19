@@ -37,6 +37,22 @@
       "compare": "drop",
       "ignoreKeys": ["etag", "epoch"],
       "timeoutMs": 60000
+    },
+    {
+      "id": "zoom",
+      "tool": "computer_zoom",
+      "arguments": { "x": 0, "y": 0, "w": 80, "h": 60, "scale": 2 },
+      "compare": "drop",
+      "ignoreKeys": ["etag", "epoch"],
+      "timeoutMs": 60000
+    },
+    {
+      "id": "screen",
+      "tool": "computer_screen_info",
+      "arguments": {},
+      "compare": "drop",
+      "ignoreKeys": ["cursor"],
+      "timeoutMs": 30000
     }
   ]
 }
