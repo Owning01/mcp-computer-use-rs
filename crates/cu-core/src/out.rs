@@ -6,6 +6,8 @@ use serde_json::Value;
 
 pub enum ToolOut {
     Json(Value, bool),
+    // structuredContent = payload (emula el auto-derive del SDK para tools con outputSchema).
+    JsonStructured(Value, bool),
     Raw(String, bool),
     Image {
         mime: String,

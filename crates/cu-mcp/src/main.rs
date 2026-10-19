@@ -689,6 +689,14 @@ async fn native_cluster(
                 "isError":err
             }})
         }
+        cu_core::out::ToolOut::JsonStructured(p, err) => {
+            let text = serde_json::to_string(&p)?;
+            json!({"jsonrpc":"2.0","id":id,"result":{
+                "content":[{"type":"text","text":text}],
+                "structuredContent":p,
+                "isError":err
+            }})
+        }
         cu_core::out::ToolOut::Raw(s, err) => json!({"jsonrpc":"2.0","id":id,"result":{
             "content":[{"type":"text","text":s}],
             "isError":err

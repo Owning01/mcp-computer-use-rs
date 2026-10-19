@@ -6,4 +6,5 @@ edition.workspace = true
 [dependencies]
 cu-core = { workspace = true }
 serde_json = { workspace = true }
-windows = { workspace = true }
+windows = { workspace = true, features = ["Win32_UI_Accessibility", "Win32_System_Com", "Win32_Foundation", "Win32_System_Diagnostics_ToolHelp", "Win32_UI_WindowsAndMessaging"] }
+sha1 = "=0.11.0"

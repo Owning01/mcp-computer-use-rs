@@ -91,6 +91,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a6ef517f0926dd24a1582492c791b6a4818a4d94e789a334894aa15b0d12f55c"
 
 [[package]]
+name = "cpufeatures"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5ca28b0ae3115b884660db4118d803791fd6756b6e88f39c0f3f7859060d7566"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "crc32fast"
 version = "1.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -120,7 +129,9 @@ dependencies = [
 name = "cu-input"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "cu-core",
+ "cu-native",
  "serde_json",
  "windows",
 ]
@@ -147,7 +158,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "cu-uia"
+name = "cu-shell"
 version = "0.1.0"
 dependencies = [
  "cu-core",
@@ -156,11 +167,30 @@ dependencies = [
 ]
 
 [[package]]
-name = "cu-winops"
+name = "cu-uia"
 version = "0.1.0"
 dependencies = [
  "cu-core",
+ "serde_json",
+ "sha1",
+ "windows",
+]
+
+[[package]]
+name = "cu-wgc"
+version = "0.1.0"
+dependencies = [
+ "windows",
+]
+
+[[package]]
+name = "cu-winops"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "cu-core",
  "cu-native",
+ "image",
  "serde_json",
  "windows",
 ]
@@ -449,6 +479,17 @@ dependencies = [
  "serde",
  "serde_core",
  "zmij",
+]
+
+[[package]]
+name = "sha1"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aacc4cc499359472b4abe1bf11d0b12e688af9a805fa5e3016f9a386dc2d0214"
+dependencies = [
+ "cfg-if",
+ "cpufeatures",
+ "digest",
 ]
 
 [[package]]
