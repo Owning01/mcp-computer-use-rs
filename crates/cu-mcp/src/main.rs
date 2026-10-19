@@ -187,6 +187,12 @@ async fn run() -> anyhow::Result<()> {
                             native_clipboard(&msg, &mut stdout).await?;
                         } else if name == "computer_incidents" {
                             native_incidents(&msg, &mut stdout).await?;
+                        } else if name == "computer_login"
+                            && cu_core::js::flag_truthy(
+                                msg.pointer("/params/arguments/list_profiles"),
+                            )
+                        {
+                            native_login_profiles(&msg, &mut stdout).await?;
                         } else if is_request && child_in.is_none() {
                             let resp = json!({
                                 "jsonrpc": "2.0",
@@ -621,6 +627,17 @@ async fn native_incidents(msg: &Value, stdout: &mut tokio::io::Stdout) -> anyhow
         "content":[{"type":"text","text":text}],
         "isError":is_error
     }});
+    respond_value(stdout, &resp).await
+}
+
+async fn native_login_profiles(msg: &Value, stdout: &mut tokio::io::Stdout) -> anyhow::Result<()> {
+    let id = msg.get("id").cloned().unwrap_or(Value::Null);
+    let profiles = tokio::task::spawn_blocking(cu_core::profiles::get_browser_profiles).await?;
+    let count = profiles.len();
+    let text = serde_json::to_string(
+        &json!({"ok": true, "count": count, "profiles": profiles}),
+    )?;
+    let resp = json!({"jsonrpc":"2.0","id":id,"result":{"content":[{"type":"text","text":text}]}});
     respond_value(stdout, &resp).await
 }
 

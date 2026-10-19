@@ -9,6 +9,7 @@
 // - La firma agrupable usa un matcher propio equivalente a las regex de JS (signature_of).
 // - El id deriva 6 hex de un hash de (ms, pid, contador) en vez de randomBytes(3);
 //   mismo formato inc_<ms>_<6hex>.
+use crate::js::{js_num_to_f64, js_string_of, js_truthy};
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
 use std::io::Write;
@@ -91,43 +92,6 @@ fn agent_label() -> String {
 }
 
 // --- Helpers JS -------------------------------------------------------------
-
-fn js_truthy(v: &Value) -> bool {
-    match v {
-        Value::Null => false,
-        Value::Bool(b) => *b,
-        Value::Number(n) => n.as_f64().map(|f| f != 0.0 && !f.is_nan()).unwrap_or(true),
-        Value::String(s) => !s.is_empty(),
-        _ => true,
-    }
-}
-
-fn js_string_of(v: &Value) -> String {
-    match v {
-        Value::String(s) => s.clone(),
-        Value::Number(n) => n.to_string(),
-        Value::Bool(b) => b.to_string(),
-        Value::Null => "null".to_string(),
-        Value::Array(a) => a
-            .iter()
-            .map(|x| match x {
-                Value::Null => String::new(),
-                other => js_string_of(other),
-            })
-            .collect::<Vec<_>>()
-            .join(","),
-        Value::Object(_) => "[object Object]".to_string(),
-    }
-}
-
-fn js_num_to_f64(v: &Value) -> Option<f64> {
-    match v {
-        Value::Number(n) => n.as_f64(),
-        Value::String(s) => s.trim().parse::<f64>().ok(),
-        Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
-        _ => None,
-    }
-}
 
 fn truncate_string(value: &str) -> String {
     let len = value.chars().count();

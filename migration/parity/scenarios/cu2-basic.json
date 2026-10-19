@@ -96,6 +96,13 @@
       "arguments": { "action": "get", "id": "inc_0_000000" },
       "compare": "drop",
       "timeoutMs": 30000
+    },
+    {
+      "id": "login",
+      "tool": "computer_login",
+      "arguments": { "list_profiles": true },
+      "compare": "drop",
+      "timeoutMs": 30000
     }
   ]
 }
