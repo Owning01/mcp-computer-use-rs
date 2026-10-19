@@ -72,7 +72,11 @@ dependencies = [
  "anyhow",
  "base64",
  "cu-core",
+ "cu-input",
+ "cu-misc",
  "cu-native",
+ "cu-uia",
+ "cu-winops",
  "md-5",
  "serde_json",
  "tokio",
@@ -113,12 +117,50 @@ dependencies = [
 ]
 
 [[package]]
+name = "cu-input"
+version = "0.1.0"
+dependencies = [
+ "cu-core",
+ "serde_json",
+ "windows",
+]
+
+[[package]]
+name = "cu-misc"
+version = "0.1.0"
+dependencies = [
+ "cu-core",
+ "cu-native",
+ "serde_json",
+ "windows",
+]
+
+[[package]]
 name = "cu-native"
 version = "0.1.0"
 dependencies = [
  "image",
  "md-5",
  "serde",
+ "serde_json",
+ "windows",
+]
+
+[[package]]
+name = "cu-uia"
+version = "0.1.0"
+dependencies = [
+ "cu-core",
+ "serde_json",
+ "windows",
+]
+
+[[package]]
+name = "cu-winops"
+version = "0.1.0"
+dependencies = [
+ "cu-core",
+ "cu-native",
  "serde_json",
  "windows",
 ]

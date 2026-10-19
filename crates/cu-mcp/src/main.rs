@@ -14,7 +14,6 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::mpsc;
 
-static EPOCH: AtomicU64 = AtomicU64::new(0);
 static SHOT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 const ORIGIN_NODE: &str = "node";
@@ -195,6 +194,12 @@ async fn run() -> anyhow::Result<()> {
                             native_login_profiles(&msg, &mut stdout).await?;
                         } else if name == "computer_lock" {
                             native_lock(&msg, &mut stdout).await?;
+                        } else if cu_uia::handles(&name)
+                            || cu_input::handles(&name)
+                            || cu_winops::handles(&name)
+                            || cu_misc::handles(&name)
+                        {
+                            native_cluster(&name, &msg, &mut stdout).await?;
                         } else if is_request && child_in.is_none() {
                             let resp = json!({
                                 "jsonrpc": "2.0",
@@ -326,7 +331,7 @@ async fn native_screenshot(msg: &Value, stdout: &mut tokio::io::Stdout) -> anyho
             respond_value(stdout, &resp).await
         }
         cu_native::capture::ShotOut::Ok(ok) => {
-            let epoch = EPOCH.fetch_add(1, Ordering::SeqCst) + 1;
+            let epoch = cu_core::epoch::bump();
             let etag = md5_hex(&ok.bytes);
             if etag_req.as_deref() == Some(etag.as_str()) {
                 let text = serde_json::to_string(&json!({
@@ -519,7 +524,7 @@ async fn native_zoom(msg: &Value, stdout: &mut tokio::io::Stdout) -> anyhow::Res
             respond_value(stdout, &resp).await
         }
         cu_native::capture::ShotOut::Ok(ok) => {
-            let epoch = EPOCH.fetch_add(1, Ordering::SeqCst) + 1;
+            let epoch = cu_core::epoch::bump();
             let etag = md5_hex(&ok.bytes);
             let mime = if ok.is_jpeg { "image/jpeg" } else { "image/png" };
             let mut meta = serde_json::Map::new();
@@ -604,7 +609,7 @@ async fn native_clipboard(msg: &Value, stdout: &mut tokio::io::Stdout) -> anyhow
     let r = tokio::task::spawn_blocking(move || cu_native::system::clipboard_set(&text_to_set)).await?;
     match r {
         Ok(()) => {
-            let epoch = EPOCH.fetch_add(1, Ordering::SeqCst) + 1;
+            let epoch = cu_core::epoch::bump();
             let text = serde_json::to_string(
                 &json!({ "ok": true, "action": "clipboard_set", "epoch": epoch }),
             )?;
@@ -653,6 +658,50 @@ async fn native_lock(msg: &Value, stdout: &mut tokio::io::Stdout) -> anyhow::Res
         "content":[{"type":"text","text":text}],
         "isError":is_error
     }});
+    respond_value(stdout, &resp).await
+}
+
+async fn native_cluster(
+    name: &str,
+    msg: &Value,
+    stdout: &mut tokio::io::Stdout,
+) -> anyhow::Result<()> {
+    let args = msg["params"]["arguments"].clone();
+    let id = msg.get("id").cloned().unwrap_or(Value::Null);
+    let name_owned = name.to_string();
+    let out = tokio::task::spawn_blocking(move || {
+        if cu_uia::handles(&name_owned) {
+            cu_uia::handle_call(&name_owned, &args)
+        } else if cu_input::handles(&name_owned) {
+            cu_input::handle_call(&name_owned, &args)
+        } else if cu_winops::handles(&name_owned) {
+            cu_winops::handle_call(&name_owned, &args)
+        } else {
+            cu_misc::handle_call(&name_owned, &args)
+        }
+    })
+    .await?;
+    let resp = match out {
+        cu_core::out::ToolOut::Json(p, err) => {
+            let text = serde_json::to_string(&p)?;
+            json!({"jsonrpc":"2.0","id":id,"result":{
+                "content":[{"type":"text","text":text}],
+                "isError":err
+            }})
+        }
+        cu_core::out::ToolOut::Raw(s, err) => json!({"jsonrpc":"2.0","id":id,"result":{
+            "content":[{"type":"text","text":s}],
+            "isError":err
+        }}),
+        cu_core::out::ToolOut::Image { mime, data_b64, text } => json!({"jsonrpc":"2.0","id":id,"result":{"content":[
+            {"type":"image","data":data_b64,"mimeType":mime},
+            {"type":"text","text":text}
+        ]}}),
+        cu_core::out::ToolOut::Link { mime, text, uri, name: nm } => json!({"jsonrpc":"2.0","id":id,"result":{"content":[
+            {"type":"text","text":text},
+            {"type":"resource_link","uri":uri,"name":nm,"mimeType":mime}
+        ]}}),
+    };
     respond_value(stdout, &resp).await
 }
 

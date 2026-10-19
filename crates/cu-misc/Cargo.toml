@@ -1,0 +1,10 @@
+[package]
+name = "cu-misc"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+cu-core = { workspace = true }
+cu-native = { workspace = true }
+serde_json = { workspace = true }
+windows = { workspace = true }

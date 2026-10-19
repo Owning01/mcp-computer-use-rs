@@ -1,0 +1,9 @@
+[package]
+name = "cu-uia"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+cu-core = { workspace = true }
+serde_json = { workspace = true }
+windows = { workspace = true }
