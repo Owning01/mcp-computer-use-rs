@@ -5,10 +5,10 @@ MCP de control de escritorio Windows (68 tools; 12 en perfil agent). Reemplazo R
 `G:\Proyectos\MCP\computer-use2` (Node.js ESM + PowerShell 5.1 + C# net9 + Python). Programa repo-migrate (F0→F8).
 
 ## Estado
-- F0–F5 COMPLETOS. F6 en curso: **puente JSON-RPC crudo** con 55 de 68 tools nativos; el resto se proxea al hijo Node (cero regresión).
+- F0–F5 COMPLETOS. F6 en curso: **puente JSON-RPC crudo** con 60 de 68 tools nativos; el resto se proxea al hijo Node (cero regresión).
 - Tools nativos — base (10): `computer_list_windows`, `computer_screenshot` (+WGC real), `computer_zoom`, `computer_screen_info`, `computer_awake`, `computer_active_window`, `computer_clipboard`, `computer_incidents`, `computer_login` (completo: list_profiles + launch), `computer_lock`.
 - Clusters (45): UIA — `inspect_ui`, `snapshot`, `state_fingerprint`, `verify`, `find_element`, `map_ui`, `find_template`, `ui_action`, `read_selection`, `observe`, `system_tray`, `context_menu`, `toast_action` · input — `hotkey`, `key`, `move`, `copy`, `paste`, `bulk_input`, `drag_scroll`, `click`, `double_click`, `human_click`, `drag`, `scroll`, `type`, `handle_file_dialog` · ventanas — `focus_window`, `window_action`, `wait_for`, `monitor_action`, `wait` · varios — `process_tree`, `check_health`, `calibrate_dpi`, `alert_user`, `audio_action`, `detect_block`, `pass_barrier`, `dismiss_overlay`, `computer_shell`, `shell_exec`, `shell_background`, `wait_download` · shell — `indicator`.
-- Pendientes (13): `act`, `click_text`, `fill_form`, `scroll_to_text`, `upload_file`, `background_action` (pasada final cu-uia), `wait_stable`, `macro_record/list/delete/replay`, `batch`, `ocr` (bloque de puente/decidencia).
+- Pendientes (8): `act`, `fill_form`, `scroll_to_text`, `upload_file`, `wait_stable` (async), `macro_replay` (hijo), `batch` (dispatch interno), `ocr` (decisión sidecar).
 - Routing especial: mientras el hijo Node graba una macro (`computer_macro_record` start..stop, espejado en el puente), el puente NO intercepta clusters: la llamada va al hijo para quedar registrada.
 - Sin cutover: `opencode.json` sigue apuntando al origen Node. El binario Rust se valida con el harness de paridad (juez + smoke congelado).
 - Divergencias documentadas y aceptadas: WGC real pendiente (`wgc_unavailable` controlado); `cursor`/`annotate_marks` TODO(port); PaddleOCR sidecar.
