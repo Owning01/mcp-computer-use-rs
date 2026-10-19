@@ -346,6 +346,23 @@ fn recording_status() -> Value {
     }
 }
 
+// --- API pública para el replay nativo (crate cu-exec) ------------------------
+
+/// Carga un macro del directorio por defecto (usado por el replay nativo).
+pub fn load_macro_pub(name: &str) -> Option<Value> {
+    load_macro(name, None)
+}
+
+/// Guarda un macro (healing del replay) en el directorio por defecto.
+pub fn save_macro_pub(macro_v: &Value) -> Result<PathBuf, String> {
+    save_macro(macro_v, None)
+}
+
+/// Ruta del archivo de un macro (para responder `path`).
+pub fn macro_path_pub(name: &str) -> PathBuf {
+    macro_path(name, None)
+}
+
 // --- Tool MCP ----------------------------------------------------------------
 
 // computer_macro_record -> (payload, isError, structuredContent).

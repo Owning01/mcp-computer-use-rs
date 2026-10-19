@@ -210,6 +210,7 @@ dependencies = [
  "anyhow",
  "base64",
  "cu-core",
+ "cu-exec",
  "cu-input",
  "cu-misc",
  "cu-native",
@@ -294,6 +295,14 @@ version = "0.1.0"
 dependencies = [
  "serde_json",
  "windows",
+]
+
+[[package]]
+name = "cu-exec"
+version = "0.1.0"
+dependencies = [
+ "cu-core",
+ "serde_json",
 ]
 
 [[package]]

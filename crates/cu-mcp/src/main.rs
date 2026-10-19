@@ -10,6 +10,7 @@
 use serde_json::{json, Value};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, OnceLock};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::mpsc;
@@ -19,6 +20,9 @@ static SHOT_COUNTER: AtomicU64 = AtomicU64::new(0);
 const ORIGIN_NODE: &str = "node";
 const ORIGIN_SCRIPT: &str = "G:/Proyectos/MCP/computer-use2/src/index.js";
 const ORIGIN_CWD: &str = "G:/Proyectos/MCP/computer-use2";
+// El dispatcher interno (cu-exec) se activa cuando el crate está implementado; mientras
+// tanto computer_batch / computer_macro_replay siguen proxieados al hijo Node.
+const CU_EXEC_READY: bool = false;
 
 const AGENT_PROFILE_TOOLS: [&str; 12] = [
     "computer_screenshot",
@@ -218,6 +222,10 @@ async fn run() -> anyhow::Result<()> {
                             || name == "computer_macro_delete"
                         {
                             native_macros(&msg, &mut stdout).await?;
+                        } else if CU_EXEC_READY
+                            && (name == "computer_batch" || name == "computer_macro_replay")
+                        {
+                            native_exec(&msg, &mut stdout).await?;
                         } else if {
                             let null_args = Value::Null;
                             let cargs = msg
@@ -825,6 +833,236 @@ async fn native_macros(msg: &Value, stdout: &mut tokio::io::Stdout) -> anyhow::R
         }
     }
     let resp = json!({"jsonrpc":"2.0","id":id,"result":result});
+    respond_value(stdout, &resp).await
+}
+
+// --- Dispatcher interno (computer_batch / computer_macro_replay) ---------------
+//
+// Las sub-llamadas se resuelven primero contra los clusters nativos del puente; si el tool
+// no es nativo, se reenvía a un SEGUNDO hijo Node sincrónico (mismo código del origen) que
+// se inicializa una vez y queda vivo. Es sincrónico porque cu-exec expone un Executor sync.
+
+struct SyncChild {
+    _child: std::process::Child,
+    stdin: std::process::ChildStdin,
+    stdout: std::io::BufReader<std::process::ChildStdout>,
+    next_id: i64,
+}
+
+impl Drop for SyncChild {
+    fn drop(&mut self) {
+        let _ = self._child.kill();
+    }
+}
+
+impl SyncChild {
+    fn spawn() -> Result<Self, String> {
+        let mut cmd = std::process::Command::new(ORIGIN_NODE);
+        cmd.arg(ORIGIN_SCRIPT)
+            .current_dir(ORIGIN_CWD)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null());
+        let mut child = cmd.spawn().map_err(|e| e.to_string())?;
+        let stdin = child.stdin.take().ok_or("hijo sin stdin")?;
+        let stdout = std::io::BufReader::new(child.stdout.take().ok_or("hijo sin stdout")?);
+        let mut me = SyncChild {
+            _child: child,
+            stdin,
+            stdout,
+            next_id: 1000,
+        };
+        me.init()?;
+        Ok(me)
+    }
+
+    fn write_line(&mut self, line: &str) -> Result<(), String> {
+        use std::io::Write;
+        self.stdin
+            .write_all(line.as_bytes())
+            .map_err(|e| e.to_string())?;
+        self.stdin.write_all(b"\n").map_err(|e| e.to_string())?;
+        self.stdin.flush().map_err(|e| e.to_string())
+    }
+
+    fn read_message(&mut self) -> Result<Value, String> {
+        use std::io::BufRead;
+        let mut line = String::new();
+        loop {
+            line.clear();
+            let n = self
+                .stdout
+                .read_line(&mut line)
+                .map_err(|e| e.to_string())?;
+            if n == 0 {
+                return Err("hijo cerrado".to_string());
+            }
+            let t = line.trim();
+            if t.is_empty() {
+                continue;
+            }
+            if let Ok(v) = serde_json::from_str::<Value>(t) {
+                return Ok(v);
+            }
+        }
+    }
+
+    fn init(&mut self) -> Result<(), String> {
+        let init = json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
+            "protocolVersion":"2024-11-05",
+            "capabilities":{},
+            "clientInfo":{"name":"cu2-bridge-exec","version":"0.1.0"}
+        }});
+        self.write_line(&serde_json::to_string(&init).map_err(|e| e.to_string())?)?;
+        self.write_line("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\",\"params\":{}}")?;
+        for _ in 0..50 {
+            let m = self.read_message()?;
+            if m.get("id").and_then(Value::as_i64) == Some(1) {
+                return Ok(());
+            }
+        }
+        Err("el hijo no respondió al initialize".to_string())
+    }
+
+    fn call(&mut self, tool: &str, args: &Value) -> Result<(Value, bool), String> {
+        self.next_id += 1;
+        let id = self.next_id;
+        let req = json!({"jsonrpc":"2.0","id":id,"method":"tools/call",
+            "params":{"name":tool,"arguments":args}});
+        self.write_line(&serde_json::to_string(&req).map_err(|e| e.to_string())?)?;
+        for _ in 0..500 {
+            let m = self.read_message()?;
+            if m.get("id").and_then(Value::as_i64) != Some(id) {
+                continue;
+            }
+            if let Some(err) = m.get("error") {
+                let msg = err
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .unwrap_or("error interno");
+                return Err(msg.to_string());
+            }
+            let result = m.get("result").cloned().unwrap_or(Value::Null);
+            let is_error = result
+                .get("isError")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let text = result
+                .pointer("/content/0/text")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let payload: Value = serde_json::from_str(text).unwrap_or(Value::Null);
+            return Ok((payload, is_error));
+        }
+        Err("timeout en sub-llamada".to_string())
+    }
+}
+
+fn exec_child() -> &'static Arc<std::sync::Mutex<Option<SyncChild>>> {
+    static CHILD: OnceLock<Arc<std::sync::Mutex<Option<SyncChild>>>> = OnceLock::new();
+    CHILD.get_or_init(|| Arc::new(std::sync::Mutex::new(None)))
+}
+
+// Convierte un ToolOut de cluster en (payload, isError) para el Executor.
+fn toolout_payload(out: &cu_core::out::ToolOut) -> (Value, bool) {
+    match out {
+        cu_core::out::ToolOut::Json(p, e) => (p.clone(), *e),
+        cu_core::out::ToolOut::JsonStructured(p, e) => (p.clone(), *e),
+        cu_core::out::ToolOut::Raw(s, e) => (Value::String(s.clone()), *e),
+        cu_core::out::ToolOut::Image { text, .. } => (Value::String(text.clone()), false),
+        cu_core::out::ToolOut::Link { text, .. } => (Value::String(text.clone()), false),
+    }
+}
+
+// Sub-llamada servida por un cluster nativo (mismo orden que el dispatch del puente).
+fn native_cluster_call(tool: &str, args: &Value) -> Option<(Value, bool)> {
+    let out = if cu_uia::handles(tool) && cu_uia::accepts(tool, args) {
+        cu_uia::handle_call(tool, args)
+    } else if cu_input::handles(tool) && cu_input::accepts(tool, args) {
+        cu_input::handle_call(tool, args)
+    } else if cu_winops::handles(tool) && cu_winops::accepts(tool, args) {
+        cu_winops::handle_call(tool, args)
+    } else if cu_misc::handles(tool) && cu_misc::accepts(tool, args) {
+        cu_misc::handle_call(tool, args)
+    } else if cu_shell::handles(tool) && cu_shell::accepts(tool, args) {
+        cu_shell::handle_call(tool, args)
+    } else if cu_ocr::handles(tool) && cu_ocr::accepts(tool, args) {
+        cu_ocr::handle_call(tool, args)
+    } else {
+        return None;
+    };
+    Some(toolout_payload(&out))
+}
+
+// Sub-llamada de macros servida por cu-core (mismo handler que el puente).
+fn native_macro_call(tool: &str, args: &Value) -> Option<(Value, bool)> {
+    let (payload, is_err, _structured) = match tool {
+        "computer_macro_record" => cu_core::macros::handle_record(args),
+        "computer_macro_list" => cu_core::macros::handle_list(),
+        "computer_macro_delete" => cu_core::macros::handle_delete(args),
+        _ => return None,
+    };
+    Some((payload, is_err))
+}
+
+struct BridgeExec {
+    child: Arc<std::sync::Mutex<Option<SyncChild>>>,
+}
+
+impl cu_exec::Executor for BridgeExec {
+    fn call(&self, tool: &str, args: &Value) -> Result<(Value, bool), String> {
+        if let Some(res) = native_cluster_call(tool, args) {
+            return Ok(res);
+        }
+        if let Some(res) = native_macro_call(tool, args) {
+            return Ok(res);
+        }
+        let mut guard = self.child.lock().unwrap_or_else(|e| e.into_inner());
+        if guard.is_none() {
+            *guard = Some(SyncChild::spawn()?);
+        }
+        let child = guard.as_mut().ok_or("hijo no disponible")?;
+        child.call(tool, args)
+    }
+}
+
+async fn native_exec(msg: &Value, stdout: &mut tokio::io::Stdout) -> anyhow::Result<()> {
+    let args = msg["params"]["arguments"].clone();
+    let id = msg.get("id").cloned().unwrap_or(Value::Null);
+    let name = msg["params"]["name"].as_str().unwrap_or("").to_string();
+    let exec = BridgeExec {
+        child: exec_child().clone(),
+    };
+    let out = tokio::task::spawn_blocking(move || cu_exec::handle_call(&name, &args, &exec)).await?;
+    let resp = match out {
+        cu_core::out::ToolOut::Json(p, err) => {
+            let text = serde_json::to_string(&p)?;
+            json!({"jsonrpc":"2.0","id":id,"result":{
+                "content":[{"type":"text","text":text}],
+                "isError":err
+            }})
+        }
+        cu_core::out::ToolOut::JsonStructured(p, err) => {
+            let text = serde_json::to_string(&p)?;
+            json!({"jsonrpc":"2.0","id":id,"result":{
+                "content":[{"type":"text","text":text}],
+                "structuredContent":p,
+                "isError":err
+            }})
+        }
+        cu_core::out::ToolOut::Raw(s, err) => json!({"jsonrpc":"2.0","id":id,"result":{
+            "content":[{"type":"text","text":s}],
+            "isError":err
+        }}),
+        cu_core::out::ToolOut::Image { mime, data_b64, text } => json!({"jsonrpc":"2.0","id":id,"result":{"content":[
+            {"type":"image","data":data_b64,"mimeType":mime},
+            {"type":"text","text":text}
+        ]}}),
+        cu_core::out::ToolOut::Link { mime, text, uri, name: nm } => json!({"jsonrpc":"2.0","id":id,"result":{"content":[
+            {"type":"text","text":text},
+            {"type":"resource_link","uri":uri,"name":nm,"mimeType":mime}
+        ]}}),
+    };
     respond_value(stdout, &resp).await
 }
 
