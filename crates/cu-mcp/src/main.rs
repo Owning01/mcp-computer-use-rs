@@ -119,9 +119,12 @@ async fn run() -> anyhow::Result<()> {
             .and_then(|v| v.trim().parse::<u64>().ok())
             .unwrap_or(600_000);
         if idle_ms > 0 && !disable_child {
+            // El tick es proporcional al timeout (para que un timeout corto sea testeable)
+            // y nunca supera los 60 s.
+            let tick = std::cmp::max(1000, std::cmp::min(idle_ms / 4, 60_000)) as u64;
             tokio::spawn(async move {
                 loop {
-                    tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                    tokio::time::sleep(std::time::Duration::from_millis(tick)).await;
                     let pid = CHILD_PID.load(Ordering::SeqCst);
                     if pid == 0 {
                         continue;
@@ -1559,9 +1562,11 @@ fn now_ms_u64() -> u64 {
 
 fn spawn_origin() -> anyhow::Result<(Option<Child>, Option<ChildStdin>, Option<Lines<BufReader<ChildStdout>>>)> {
     let mut cmd = Command::new(ORIGIN_NODE);
-    // V8: semi-espacio chico = menos RSS por proceso (el origen no necesita un young
-    // generation grande). Es un hint de tamaño, no un límite duro: no puede tirar OOM.
-    cmd.arg("--max-semi-space-size=4");
+    // V8: semi-espacio chico = menos RSS por proceso (medido: 76,4 MB -> 70,1 MB).
+    // Es un hint de tamaño del young generation, no un límite duro: no puede tirar OOM.
+    // No se limita el old space a propósito: con subidas de archivos grandes el heap
+    // podria crecer y un tope duro mataria al hijo.
+    cmd.arg("--max-semi-space-size=1");
     cmd.arg(ORIGIN_SCRIPT)
         .current_dir(ORIGIN_CWD)
         .stdin(Stdio::piped())

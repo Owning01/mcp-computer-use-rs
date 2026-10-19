@@ -11,11 +11,9 @@ MCP de control de escritorio Windows (68 tools; 12 en perfil agent). Reemplazo R
 - Capa de seguridad del puente: bloqueo de gestores de contraseñas (`cu-core::blocked`), lock multi-agente para tools nativos (`cu-core::plan` + `cu-core::lock`, respuesta `busy` del origen), epoch único compartido con el hijo, incidentes de todo tool nativo que falla, y timeout de lectura del dispatcher interno.
 - Progress notifications del puente: native_cluster emite `notifications/progress` si el cliente manda `_meta.progressToken` (el replay nativo emite uno por paso).
 - Pendiente (1): `computer_upload_file` — divergencia F7: su Tier 1 es inyección CDP (requiere cliente DevTools).
-otifications/progress si el cliente manda _meta.progressToken (el replay nativo emite uno por paso).
-- Pendiente (1): computer_upload_file - divergencia F7: su Tier 1 es inyeccion CDP (requiere cliente DevTools).
 - Routing especial: mientras el hijo Node graba una macro (`computer_macro_record` start..stop, espejado en el puente), el puente NO intercepta clusters: la llamada va al hijo para quedar registrada.
-- Sin cutover: `opencode.json` sigue apuntando al origen Node. El binario Rust se valida con el harness de paridad (juez + smoke congelado).
-- Divergencias documentadas y aceptadas: WGC real pendiente (`wgc_unavailable` controlado); `cursor`/`annotate_marks` TODO(port); PaddleOCR sidecar.
+- Ciclo de vida del hijo Node (optimización de RAM): el origen se arranca **lazy** (solo cuando una llamada necesita proxy), el watchdog lo mata si pasa `COMPUTER_USE_CHILD_IDLE_MS` (10 min default) sin uso (`taskkill /T`, sin daemons huérfanos) y el puente lo rearma con reintento si muere. El origen se lanza con `--max-semi-space-size=1` (RSS 76,4 → 70,1 MB).
+- Divergencias y pendientes de port: `migration/DIVERGENCES.md` (el WGC real ya está in-process en `cu-wgc`).
 
 ## Estructura
 - `crates/cu-mcp` — binario `computer-use2-rs.exe`: puente JSON-RPC crudo; intercepta los tools nativos y proxea el resto al hijo Node (`node src/index.js`).
@@ -39,5 +37,5 @@ otifications/progress si el cliente manda _meta.progressToken (el replay nativo 
 - Órdenes de claves fijados por el origen (`ConvertTo-Json` de PS 5.1, `JSON.stringify`); el juez compara byte a byte → los payloads nativos se construyen en ese orden exacto.
 - Spawns no-interactivos: `stdin(Stdio::null())` (regla del rulebook; evita cuelgues).
 - Tooling (PowerShell): no pipear `cargo ... | Select-Object -First N` — mata el build a mitad; capturar la salida completa en variable y después filtrar.
-- El origen sigue siendo el server activo de OpenCode hasta el cutover; no tocar su config antes.
-- Cutover de cu2 pendiente: 1 línea de `opencode.json` (rollback = restaurar la línea del origen).
+- El binario de `target/release/` no se puede reemplazar con la app abierta: las instancias del servidor MCP lo tienen bloqueado (compilar a `--target-dir target2` o cerrar los servidores).
+- Rollback del cutover: restaurar `C:\Users\perca\.config\opencode\opencode.json.bak-f6` sobre `opencode.json` y reiniciar OpenCode.
