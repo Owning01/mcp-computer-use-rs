@@ -185,6 +185,8 @@ async fn run() -> anyhow::Result<()> {
                             native_active_window(&msg, &mut stdout).await?;
                         } else if name == "computer_clipboard" {
                             native_clipboard(&msg, &mut stdout).await?;
+                        } else if name == "computer_incidents" {
+                            native_incidents(&msg, &mut stdout).await?;
                         } else if is_request && child_in.is_none() {
                             let resp = json!({
                                 "jsonrpc": "2.0",
@@ -485,7 +487,6 @@ async fn native_zoom(msg: &Value, stdout: &mut tokio::io::Stdout) -> anyhow::Res
     let jpeg = args.get("format").and_then(Value::as_str) == Some("jpeg");
     let quality = ji(args.get("quality"), 10, 95, 90);
     let out_w = ((zw as f64) * scale).round().max(1.0) as i64;
-    let out_h = ((zh as f64) * scale).round().max(1.0) as i64;
     let link = args.get("link").and_then(Value::as_bool).unwrap_or(false);
 
     let shot_args = cu_native::capture::ShotArgs {
@@ -608,6 +609,19 @@ async fn native_clipboard(msg: &Value, stdout: &mut tokio::io::Stdout) -> anyhow
             respond_value(stdout, &resp).await
         }
     }
+}
+
+async fn native_incidents(msg: &Value, stdout: &mut tokio::io::Stdout) -> anyhow::Result<()> {
+    let args = msg["params"]["arguments"].clone();
+    let id = msg.get("id").cloned().unwrap_or(Value::Null);
+    let (payload, is_error) =
+        tokio::task::spawn_blocking(move || cu_core::incidents::handle_tool(&args)).await?;
+    let text = serde_json::to_string(&payload)?;
+    let resp = json!({"jsonrpc":"2.0","id":id,"result":{
+        "content":[{"type":"text","text":text}],
+        "isError":is_error
+    }});
+    respond_value(stdout, &resp).await
 }
 
 async fn bootstrap_child(child_in: &mut Option<ChildStdin>) -> anyhow::Result<()> {

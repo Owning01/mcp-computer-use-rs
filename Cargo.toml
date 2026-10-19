@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/cu-mcp", "crates/cu-native"]
+members = ["crates/cu-core", "crates/cu-mcp", "crates/cu-native"]
 
 [workspace.package]
 edition = "2024"
@@ -17,4 +17,5 @@ tokio = { version = "=1.53.3", features = ["rt-multi-thread", "macros", "time", 
 tracing = "=0.1.44"
 tracing-subscriber = "=0.3.23"
 windows = { version = "=0.62.2", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_UI_HiDpi", "Win32_System_Power", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_System_Ole"] }
+cu-core = { path = "crates/cu-core" }
 cu-native = { path = "crates/cu-native" }

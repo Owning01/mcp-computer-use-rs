@@ -75,6 +75,27 @@
       "arguments": { "action": "get" },
       "compare": "drop",
       "timeoutMs": 30000
+    },
+    {
+      "id": "inc_list",
+      "tool": "computer_incidents",
+      "arguments": { "action": "list", "limit": 5 },
+      "compare": "drop",
+      "timeoutMs": 30000
+    },
+    {
+      "id": "inc_summary",
+      "tool": "computer_incidents",
+      "arguments": { "action": "summary" },
+      "compare": "drop",
+      "timeoutMs": 30000
+    },
+    {
+      "id": "inc_get_missing",
+      "tool": "computer_incidents",
+      "arguments": { "action": "get", "id": "inc_0_000000" },
+      "compare": "drop",
+      "timeoutMs": 30000
     }
   ]
 }
