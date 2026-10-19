@@ -1,0 +1,901 @@
+{
+ "count": 68,
+ "tools": [
+  {
+   "name": "computer_screenshot",
+   "title": "Captura de pantalla",
+   "props": [
+    "width",
+    "format",
+    "quality",
+    "hwnd",
+    "x",
+    "y",
+    "w",
+    "h",
+    "bare",
+    "cursor",
+    "screen",
+    "etag",
+    "capture",
+    "link",
+    "annotate_marks"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_act",
+   "title": "Acción atómica unificada",
+   "props": [
+    "target",
+    "action",
+    "text",
+    "secret_b64",
+    "clear_first",
+    "press_enter",
+    "key",
+    "offset_x",
+    "offset_y",
+    "target_window",
+    "behavior",
+    "wait_ms",
+    "observe_after"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_observe",
+   "title": "Observar pantalla (compacto)",
+   "props": [
+    "target_window",
+    "limit",
+    "screenshot",
+    "link",
+    "format"
+   ],
+   "taskSupport": null,
+   "outputSchema": true
+  },
+  {
+   "name": "computer_shell",
+   "title": "Ejecución unificada de comandos",
+   "props": [
+    "command",
+    "cwd",
+    "background",
+    "isolated_desktop",
+    "timeout"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_wait",
+   "title": "Espera unificada (estable/texto/descarga/tiempo)",
+   "props": [
+    "condition",
+    "text",
+    "disappear",
+    "timeout_ms",
+    "target_window"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_zoom",
+   "title": "Zoom de región",
+   "props": [
+    "x",
+    "y",
+    "w",
+    "h",
+    "scale",
+    "smooth",
+    "format",
+    "quality",
+    "link"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_screen_info",
+   "title": "Info de pantalla",
+   "props": [],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_hotkey",
+   "title": "Atajo de teclado",
+   "props": [
+    "combo"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_click_text",
+   "title": "Click por texto",
+   "props": [
+    "text",
+    "hwnd",
+    "target_window",
+    "button",
+    "double_click",
+    "exact",
+    "case_sensitive",
+    "occurrence",
+    "offset_x",
+    "offset_y",
+    "clear_first",
+    "type_text",
+    "secret_b64",
+    "press_enter",
+    "human_like",
+    "behavior",
+    "auto_scroll",
+    "max_scrolls",
+    "wait_modal_after",
+    "dismiss_overlay_first"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_map_ui",
+   "title": "Mapa de UI",
+   "props": [
+    "hwnd",
+    "target_window"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_click",
+   "title": "Click",
+   "props": [
+    "x",
+    "y",
+    "id",
+    "ref",
+    "button",
+    "target_window",
+    "human_like",
+    "snapshot_after",
+    "behavior"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_double_click",
+   "title": "Doble click",
+   "props": [
+    "x",
+    "y",
+    "id",
+    "ref",
+    "target_window",
+    "human_like",
+    "snapshot_after",
+    "behavior"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_human_click",
+   "title": "Click humano",
+   "props": [
+    "x",
+    "y",
+    "id",
+    "button",
+    "double_click",
+    "target_window"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_copy",
+   "title": "Copiar selección",
+   "props": [
+    "target_window"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_paste",
+   "title": "Pegar texto",
+   "props": [
+    "text",
+    "secret_b64",
+    "press_enter",
+    "target_window",
+    "snapshot_after"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_fill_form",
+   "title": "Rellenar formulario",
+   "props": [
+    "fields",
+    "submit_button",
+    "target_window"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_detect_block",
+   "title": "Detectar bloqueo/captcha",
+   "props": [
+    "hwnd",
+    "target_window",
+    "solve"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_background_action",
+   "title": "Acción UIA sin foco (apps nativas)",
+   "props": [
+    "action",
+    "ref",
+    "id",
+    "name",
+    "automation_id",
+    "value",
+    "target_window",
+    "hwnd",
+    "fallback"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_pass_barrier",
+   "title": "Pasar barrera anti-bot",
+   "props": [
+    "hwnd",
+    "target_window",
+    "strategy",
+    "max_attempts",
+    "timeout_ms",
+    "backoff_ms",
+    "async"
+   ],
+   "taskSupport": "optional",
+   "outputSchema": false
+  },
+  {
+   "name": "computer_move",
+   "title": "Mover cursor",
+   "props": [
+    "x",
+    "y"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_drag",
+   "title": "Arrastrar",
+   "props": [
+    "fromX",
+    "fromY",
+    "toX",
+    "toY",
+    "button",
+    "behavior"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_key",
+   "title": "Tecla",
+   "props": [
+    "key",
+    "action",
+    "mods"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_type",
+   "title": "Escribir texto",
+   "props": [
+    "text",
+    "secret_b64",
+    "is_secret",
+    "clear_first",
+    "press_enter",
+    "human_jitter",
+    "snapshot_after",
+    "behavior"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_scroll_to_text",
+   "title": "Scroll hasta texto",
+   "props": [
+    "text",
+    "max_scrolls",
+    "scroll_amount",
+    "target_window"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_handle_file_dialog",
+   "title": "Diálogo de archivo",
+   "props": [
+    "file_path",
+    "action"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_window_action",
+   "title": "Acción de ventana",
+   "props": [
+    "action",
+    "target_window",
+    "confirm",
+    "x",
+    "y",
+    "width",
+    "height"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_upload_file",
+   "title": "Subir archivo",
+   "props": [
+    "file_path",
+    "target_x",
+    "target_y",
+    "target_text",
+    "target_window"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_alert_user",
+   "title": "Alertar al usuario",
+   "props": [
+    "message",
+    "sound"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_scroll",
+   "title": "Scroll",
+   "props": [
+    "x",
+    "y",
+    "dy",
+    "dx",
+    "behavior"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_batch",
+   "title": "Lote atómico",
+   "props": [
+    "actions",
+    "screenshot",
+    "delay_ms",
+    "verify",
+    "expected_epoch",
+    "async"
+   ],
+   "taskSupport": "optional",
+   "outputSchema": false
+  },
+  {
+   "name": "computer_clipboard",
+   "title": "Portapapeles",
+   "props": [
+    "action",
+    "text"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_focus_window",
+   "title": "Enfocar ventana",
+   "props": [
+    "hwnd",
+    "title"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_active_window",
+   "title": "Ventana activa",
+   "props": [],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_wait_for",
+   "title": "Esperar condición",
+   "props": [
+    "title",
+    "hwnd",
+    "name",
+    "automation_id",
+    "modal_dialog",
+    "timeout_ms",
+    "interval_ms"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_login",
+   "title": "Abrir URL (login)",
+   "props": [
+    "url",
+    "profile",
+    "list_profiles",
+    "account",
+    "remote_debugging"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_find_element",
+   "title": "Buscar elemento UIA",
+   "props": [
+    "name",
+    "automation_id",
+    "title",
+    "hwnd",
+    "control_type",
+    "timeout",
+    "max_depth",
+    "max_results"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_inspect_ui",
+   "title": "Inspeccionar UI",
+   "props": [
+    "title",
+    "hwnd",
+    "name",
+    "automation_id",
+    "control_type",
+    "max_depth",
+    "max_results"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_ui_action",
+   "title": "Acción UIA",
+   "props": [
+    "name",
+    "automation_id",
+    "title",
+    "hwnd",
+    "control_type",
+    "ref",
+    "action",
+    "value",
+    "snapshot_after"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_snapshot",
+   "title": "Snapshot UIA",
+   "props": [
+    "hwnd",
+    "target_window",
+    "mode",
+    "generation",
+    "include_patterns",
+    "max_depth",
+    "max_results"
+   ],
+   "taskSupport": null,
+   "outputSchema": true
+  },
+  {
+   "name": "computer_state_fingerprint",
+   "title": "Huella de estado",
+   "props": [
+    "hwnd",
+    "target_window",
+    "max_results"
+   ],
+   "taskSupport": null,
+   "outputSchema": true
+  },
+  {
+   "name": "computer_wait_stable",
+   "title": "Esperar estabilidad",
+   "props": [
+    "hwnd",
+    "target_window",
+    "timeout_ms",
+    "interval_ms",
+    "stable_samples",
+    "max_results",
+    "async"
+   ],
+   "taskSupport": "optional",
+   "outputSchema": true
+  },
+  {
+   "name": "computer_verify",
+   "title": "Verificar expectativas",
+   "props": [
+    "hwnd",
+    "target_window",
+    "timeout_ms",
+    "max_results",
+    "expect"
+   ],
+   "taskSupport": null,
+   "outputSchema": true
+  },
+  {
+   "name": "computer_macro_record",
+   "title": "Grabar macro",
+   "props": [
+    "action",
+    "name"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_macro_list",
+   "title": "Listar macros",
+   "props": [],
+   "taskSupport": null,
+   "outputSchema": true
+  },
+  {
+   "name": "computer_macro_delete",
+   "title": "Eliminar macro",
+   "props": [
+    "name",
+    "confirm"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_macro_replay",
+   "title": "Reproducir macro",
+   "props": [
+    "name",
+    "dry_run",
+    "stop_on_failure",
+    "speed",
+    "heal",
+    "overrides",
+    "async"
+   ],
+   "taskSupport": "optional",
+   "outputSchema": false
+  },
+  {
+   "name": "computer_process_tree",
+   "title": "Árbol de procesos",
+   "props": [
+    "pid",
+    "max_depth",
+    "include_command_line"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_ocr",
+   "title": "OCR local",
+   "props": [
+    "x",
+    "y",
+    "w",
+    "h",
+    "hwnd",
+    "query",
+    "group_lines",
+    "language",
+    "device",
+    "min_confidence",
+    "max_results"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_list_windows",
+   "title": "Listar ventanas",
+   "props": [
+    "filter"
+   ],
+   "taskSupport": null,
+   "outputSchema": true
+  },
+  {
+   "name": "shell_exec",
+   "title": "Ejecutar shell",
+   "props": [
+    "command",
+    "cwd",
+    "timeout",
+    "isolated_desktop"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "shell_background",
+   "title": "Shell en segundo plano",
+   "props": [
+    "command",
+    "cwd",
+    "isolated_desktop"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_wait_download",
+   "title": "Esperar descarga",
+   "props": [
+    "timeout_seconds",
+    "download_dir",
+    "expected_ext"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_find_template",
+   "title": "Buscar plantilla visual",
+   "props": [
+    "template_b64",
+    "min_confidence",
+    "hwnd"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_monitor_action",
+   "title": "Acciones de monitor",
+   "props": [
+    "action",
+    "monitor_index",
+    "target_window"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_read_selection",
+   "title": "Leer selección",
+   "props": [
+    "select_all",
+    "click_pos",
+    "target_window"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_check_health",
+   "title": "Chequear salud app/UAC",
+   "props": [
+    "hwnd",
+    "auto_alert"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_bulk_input",
+   "title": "Inyección masiva de datos",
+   "props": [
+    "rows",
+    "target_x",
+    "target_y",
+    "target_window"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_system_tray",
+   "title": "Bandeja del sistema",
+   "props": [
+    "action",
+    "target",
+    "index",
+    "include_overflow"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_toast_action",
+   "title": "Notificaciones toast",
+   "props": [
+    "action",
+    "id",
+    "notification_id",
+    "button_text",
+    "app_filter"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_context_menu",
+   "title": "Menú contextual",
+   "props": [
+    "x",
+    "y",
+    "item_text",
+    "select_text",
+    "keys",
+    "key_sequence",
+    "delay_ms"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_drag_scroll",
+   "title": "Arrastre/scroll avanzado",
+   "props": [
+    "mode",
+    "from_x",
+    "from_y",
+    "to_x",
+    "to_y",
+    "button",
+    "modifiers",
+    "steps",
+    "delay_ms",
+    "hold_duration_ms",
+    "scroll_pulses",
+    "scroll_delta",
+    "release"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_calibrate_dpi",
+   "title": "Calibrar DPI",
+   "props": [
+    "target_window",
+    "hwnd",
+    "x",
+    "y",
+    "point",
+    "convert",
+    "from_coord_type",
+    "to_coord_type"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_audio_action",
+   "title": "Acciones de audio",
+   "props": [
+    "action",
+    "volume",
+    "mute"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_lock",
+   "title": "Lock multi-agente",
+   "props": [
+    "action",
+    "scope",
+    "ttl_ms",
+    "wait_ms",
+    "confirm"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_incidents",
+   "title": "Incidentes (RSI)",
+   "props": [
+    "action",
+    "id",
+    "tool",
+    "error_class",
+    "since",
+    "limit",
+    "note",
+    "fix",
+    "confirm"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_awake",
+   "title": "Modo antisuspensión",
+   "props": [
+    "enabled",
+    "mode",
+    "reason"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_indicator",
+   "title": "Indicador de actividad del agente",
+   "props": [
+    "action",
+    "message",
+    "type",
+    "cursor",
+    "duration_ms",
+    "sound",
+    "position"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  },
+  {
+   "name": "computer_dismiss_overlay",
+   "title": "Cerrar modal/overlay o cookies",
+   "props": [
+    "target_window",
+    "max_attempts"
+   ],
+   "taskSupport": null,
+   "outputSchema": false
+  }
+ ]
+}
