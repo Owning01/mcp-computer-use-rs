@@ -1,7 +1,8 @@
 // cu-native::capture — port de computer_screenshot (F5, repo-migrate).
 // Contrato: src/handlers/capture.js + nativeScreenshot/nativePrintWindowCapture/
-// finalizeCapturedPng de index.js. v1: gdi + printwindow. TODO(port): wgc real,
-// cursor, annotate_marks, etag-diff server-side. Reglas: migration/RULEBOOK.md.
+// finalizeCapturedPng de index.js. Hoy: gdi + printwindow + WGC real (cu-wgc, in-process
+// con Windows.Graphics.Capture) y el chain auto: printwindow -> wgc -> gdi.
+// Pendiente: cursor, annotate_marks, etag-diff server-side. Reglas: migration/RULEBOOK.md.
 use image::imageops::{resize, FilterType};
 use image::{ExtendedColorType, ImageEncoder, RgbaImage};
 use serde_json::{Map, Value, json};

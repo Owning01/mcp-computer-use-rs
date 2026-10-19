@@ -1,11 +1,14 @@
-// computer-use2-rs — binario puente F4 (repo-migrate).
+// computer-use2-rs — binario puente (repo-migrate F4→F6).
 //
-// Proxy MCP-a-MCP por stdio con 3 puntos de intercepcion:
-//   1. initialize   -> respuesta local con la forma exacta del origen (SDK 1.30.0)
-//   2. tools/list   -> metadata embebida de migration/inventory/tools-full.json (perfil agent/full)
-//   3. tools/call computer_list_windows -> implementacion nativa Rust (cu-native)
-// Todo lo demas (tasks/*, resources/*, progress, notifications) se proxea crudo al server Node
-// del origen. Puente temporal (skill repo-migrate F4); se apaga por grupos hacia F8.
+// Proxy MCP-a-MCP por stdio. Puntos de intercepción:
+//   1. initialize  -> respuesta local con la forma exacta del origen (SDK 1.30.0)
+//   2. tools/list  -> metadata embebida de migration/inventory/tools-full.json (perfil agent/full)
+//   3. tools/call  -> 67 de 68 tools servidos nativamente por los clusters (cu-core, cu-native,
+//                     cu-uia, cu-input, cu-winops, cu-misc, cu-shell, cu-ocr, cu-exec);
+//                     el resto se proxea crudo al server Node del origen.
+// Capa de seguridad (espejo del origen): bloqueo de gestores de contraseñas, lock multi-agente
+// para los tools nativos, epoch único compartido con el hijo, incidentes de todo tool que falla.
+// Todo lo demas (tasks/*, resources/*, progress, notifications) se proxea crudo al origen.
 // Reglas: migration/RULEBOOK.md (ver enmienda: puente crudo por paridad byte-exacta).
 use serde_json::{json, Value};
 use std::process::Stdio;
