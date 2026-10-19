@@ -9,12 +9,20 @@
 // Reglas: migration/RULEBOOK.md (ver enmienda: puente crudo por paridad byte-exacta).
 use serde_json::{json, Value};
 use std::process::Stdio;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Mutex;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::mpsc;
 
 static SHOT_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+// Mientras el hijo Node graba una macro (computer_macro_record start..stop), el puente no
+// intercepta tools de cluster: la llamada viaja al hijo para quedar registrada. El estado se
+// espeja observando las respuestas de computer_macro_record que cruzan el proxy.
+static MACRO_RECORDING: AtomicBool = AtomicBool::new(false);
+static MACRO_PENDING: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
 
 const ORIGIN_NODE: &str = "node";
 const ORIGIN_SCRIPT: &str = "G:/Proyectos/MCP/computer-use2/src/index.js";
@@ -110,6 +118,21 @@ async fn run() -> anyhow::Result<()> {
                     if v.get("id").and_then(Value::as_i64).is_some_and(|id| id < 0) {
                         continue;
                     }
+                    if let Some(idv) = v.get("id") {
+                        if let Some(action) = macro_pending_take(&idv.to_string()) {
+                            let text = v
+                                .pointer("/result/content/0/text")
+                                .and_then(Value::as_str)
+                                .unwrap_or("");
+                            let payload: Value = serde_json::from_str(text).unwrap_or(Value::Null);
+                            let ok = payload.get("ok") == Some(&Value::Bool(true));
+                            if action == "start" && ok {
+                                MACRO_RECORDING.store(true, Ordering::SeqCst);
+                            } else if action == "stop" {
+                                MACRO_RECORDING.store(false, Ordering::SeqCst);
+                            }
+                        }
+                    }
                 }
                 if tx.send((Src::Child, l)).await.is_err() {
                     break;
@@ -194,11 +217,17 @@ async fn run() -> anyhow::Result<()> {
                             native_login_profiles(&msg, &mut stdout).await?;
                         } else if name == "computer_lock" {
                             native_lock(&msg, &mut stdout).await?;
-                        } else if cu_uia::handles(&name)
-                            || cu_input::handles(&name)
-                            || cu_winops::handles(&name)
-                            || cu_misc::handles(&name)
-                        {
+                        } else if !macro_recording() && {
+                            let null_args = Value::Null;
+                            let cargs = msg
+                                .get("params")
+                                .and_then(|p| p.get("arguments"))
+                                .unwrap_or(&null_args);
+                            (cu_uia::handles(&name) && cu_uia::accepts(&name, cargs))
+                                || (cu_input::handles(&name) && cu_input::accepts(&name, cargs))
+                                || (cu_winops::handles(&name) && cu_winops::accepts(&name, cargs))
+                                || (cu_misc::handles(&name) && cu_misc::accepts(&name, cargs))
+                        } {
                             native_cluster(&name, &msg, &mut stdout).await?;
                         } else if is_request && child_in.is_none() {
                             let resp = json!({
@@ -208,6 +237,18 @@ async fn run() -> anyhow::Result<()> {
                             });
                             respond_value(&mut stdout, &resp).await?;
                         } else {
+                            if name == "computer_macro_record" {
+                                let action = msg
+                                    .pointer("/params/arguments/action")
+                                    .and_then(Value::as_str)
+                                    .unwrap_or("");
+                                let id_key = msg
+                                    .get("id")
+                                    .cloned()
+                                    .unwrap_or(Value::Null)
+                                    .to_string();
+                                macro_pending_insert(&id_key, action);
+                            }
                             forward(&mut child_in, &line).await?;
                         }
                     }
@@ -661,6 +702,25 @@ async fn native_lock(msg: &Value, stdout: &mut tokio::io::Stdout) -> anyhow::Res
     respond_value(stdout, &resp).await
 }
 
+fn macro_recording() -> bool {
+    MACRO_RECORDING.load(Ordering::SeqCst)
+}
+
+fn macro_pending_insert(id_key: &str, action: &str) {
+    if let Ok(mut g) = MACRO_PENDING.lock() {
+        g.get_or_insert_with(HashMap::new)
+            .insert(id_key.to_string(), action.to_string());
+    }
+}
+
+fn macro_pending_take(id_key: &str) -> Option<String> {
+    MACRO_PENDING
+        .lock()
+        .ok()?
+        .get_or_insert_with(HashMap::new)
+        .remove(id_key)
+}
+
 async fn native_cluster(
     name: &str,
     msg: &Value,
@@ -670,11 +730,11 @@ async fn native_cluster(
     let id = msg.get("id").cloned().unwrap_or(Value::Null);
     let name_owned = name.to_string();
     let out = tokio::task::spawn_blocking(move || {
-        if cu_uia::handles(&name_owned) {
+        if cu_uia::handles(&name_owned) && cu_uia::accepts(&name_owned, &args) {
             cu_uia::handle_call(&name_owned, &args)
-        } else if cu_input::handles(&name_owned) {
+        } else if cu_input::handles(&name_owned) && cu_input::accepts(&name_owned, &args) {
             cu_input::handle_call(&name_owned, &args)
-        } else if cu_winops::handles(&name_owned) {
+        } else if cu_winops::handles(&name_owned) && cu_winops::accepts(&name_owned, &args) {
             cu_winops::handle_call(&name_owned, &args)
         } else {
             cu_misc::handle_call(&name_owned, &args)
@@ -714,6 +774,8 @@ async fn native_cluster(
 }
 
 async fn bootstrap_child(child_in: &mut Option<ChildStdin>) -> anyhow::Result<()> {
+    // Hijo (re)arrancado: su estado de grabación de macros vuelve a cero.
+    MACRO_RECORDING.store(false, Ordering::SeqCst);
     // Inicializa el child Node con id interno negativo: sus respuestas no se reenvian al cliente.
     let Some(ci) = child_in.as_mut() else {
         return Ok(());

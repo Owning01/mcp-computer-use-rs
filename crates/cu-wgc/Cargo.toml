@@ -1,0 +1,7 @@
+[package]
+name = "cu-wgc"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+windows = { workspace = true }

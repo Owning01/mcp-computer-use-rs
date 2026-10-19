@@ -19,6 +19,11 @@ pub fn handles(name: &str) -> bool {
     )
 }
 
+// accepts: subconjunto de args servible nativo (default true; el puente consulta esto).
+pub fn accepts(_name: &str, _args: &Value) -> bool {
+    true
+}
+
 pub fn handle_call(name: &str, args: &Value) -> ToolOut {
     match name {
         "computer_focus_window" => {

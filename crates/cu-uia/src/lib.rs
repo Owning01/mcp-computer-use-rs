@@ -902,6 +902,11 @@ pub fn handles(name: &str) -> bool {
     matches!(name, "computer_inspect_ui" | "computer_snapshot" | "computer_state_fingerprint" | "computer_verify")
 }
 
+// accepts: subconjunto de args servible nativo (default true; el puente consulta esto).
+pub fn accepts(_name: &str, _args: &Value) -> bool {
+    true
+}
+
 pub fn handle_call(name: &str, args: &Value) -> ToolOut {
     match name {
         "computer_inspect_ui" => handle_inspect_ui(args),

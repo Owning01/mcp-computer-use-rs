@@ -7,4 +7,19 @@ edition.workspace = true
 cu-core = { workspace = true }
 cu-native = { workspace = true }
 serde_json = { workspace = true }
-windows = { workspace = true }
+windows = { workspace = true, features = [
+    "Win32_Graphics_Gdi",
+    "Win32_Media_Audio",
+    "Win32_Media_Audio_Endpoints",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_ProcessStatus",
+    "Win32_System_StationsAndDesktops",
+    "Win32_System_Variant",
+    "Win32_System_Kernel",
+    "Win32_UI_HiDpi",
+    "Wdk",
+    "Wdk_System_Threading",
+] }
