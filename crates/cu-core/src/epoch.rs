@@ -15,6 +15,14 @@ pub fn current() -> u64 {
     EPOCH.load(Ordering::SeqCst)
 }
 
+/// Adopta el epoch reportado por el hijo (respuestas proxeadas). Monótono: un epoch
+/// menor (el hijo no ve los bumps locales del puente) no hace retroceder el contador.
+pub fn adopt(value: u64) {
+    if value > current() {
+        set(value);
+    }
+}
+
 /// Adopta el epoch reportado por el hijo (respuestas proxeadas).
 pub fn set(value: u64) {
     EPOCH.store(value, Ordering::SeqCst);

@@ -433,10 +433,10 @@ fn handle_bulk_input(args: &Value) -> ToolOut {
     }
     let target_x = int_arg(args.get("target_x"), -100000, 100000, 0) as i32;
     let target_y = int_arg(args.get("target_y"), -100000, 100000, 0) as i32;
-    if target_x != 0 || target_y != 0 {
+    // PORT NOTE: origin clic solo si x>0 && y>0 (PowerShell -gt 0), con down/up y esperas 40/80.
+    if target_x > 0 && target_y > 0 {
         unsafe {
             let _ = SetCursorPos(target_x, target_y);
-            thread::sleep(Duration::from_millis(20));
             mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
             thread::sleep(Duration::from_millis(40));
             mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
@@ -444,18 +444,24 @@ fn handle_bulk_input(args: &Value) -> ToolOut {
         }
     }
 
-    // Construir TSV.
+    // Construir TSV como el origen: celdas [string] (null => ""), filas unidas por [Environment]::NewLine.
     let mut tsv_lines: Vec<String> = Vec::new();
     let mut total_cells: i64 = 0;
     for row in &rows_arr {
         let cells: Vec<String> = match row {
-            Value::Array(a) => a.iter().map(cu_core::js::js_string_of).collect(),
+            Value::Array(a) => a
+                .iter()
+                .map(|c| match c {
+                    Value::Null => String::new(),
+                    other => cu_core::js::js_string_of(other),
+                })
+                .collect(),
             _ => vec![cu_core::js::js_string_of(row)],
         };
         total_cells += cells.len() as i64;
         tsv_lines.push(cells.join("\t"));
     }
-    let tsv_text = tsv_lines.join("\n");
+    let tsv_text = tsv_lines.join("\r\n");
 
     let _ = cu_native::system::clipboard_set(&tsv_text);
     thread::sleep(Duration::from_millis(40));
@@ -498,24 +504,32 @@ fn handle_drag_scroll(args: &Value) -> ToolOut {
 
     let modifiers: Vec<String> = match args.get("modifiers") {
         Some(Value::Array(a)) => a.iter().map(cu_core::js::js_string_of).collect(),
-        Some(v) => vec![cu_core::js::js_string_of(v)],
-        None => Vec::new(),
+        Some(Value::Null) | None => Vec::new(),
+        Some(v) if cu_core::js::js_truthy(v) => vec![cu_core::js::js_string_of(v)],
+        Some(_) => Vec::new(),
     };
 
-    let mut steps = args.get("steps").map(|v| int_arg(Some(v), 1, 100000, 14)).unwrap_or(14) as i32;
-    if steps <= 0 { steps = 14; }
-    let mut delay_ms = args.get("delay_ms").map(|v| int_arg(Some(v), 1, 100000, 15)).unwrap_or(15) as i32;
-    if delay_ms <= 0 { delay_ms = 15; }
+    // PORT NOTE: origin `Number(x) || default` y luego C#: steps/delay <=0 => default; sin clamp.
+    let steps = match args.get("steps").and_then(Value::as_i64) {
+        Some(n) if n > 0 => n as i32,
+        _ => 14,
+    };
+    let delay_ms = match args.get("delay_ms").and_then(Value::as_i64) {
+        Some(n) if n > 0 => n as i32,
+        _ => 15,
+    };
 
-    let hold_default = if mode == "drag_scroll" { 800 } else { 0 };
-    let hold_duration_ms = args
-        .get("hold_duration_ms")
-        .map(|v| int_arg(Some(v), 0, 1_000_000, hold_default))
-        .unwrap_or(hold_default as i64) as i32;
+    // PORT NOTE: origin usa `args.mode === "drag_scroll"` crudo (sin lowercase) para el default de hold.
+    let hold_default: i64 = if args.get("mode").and_then(Value::as_str) == Some("drag_scroll") { 800 } else { 0 };
+    let hold_duration_ms = args.get("hold_duration_ms").and_then(Value::as_i64).unwrap_or(hold_default) as i32;
 
-    let scroll_pulses = args.get("scroll_pulses").map(|v| int_arg(Some(v), 0, 100000, 0)).unwrap_or(0) as i32;
-    let scroll_delta = args.get("scroll_delta").map(|v| int_arg(Some(v), -100000, 100000, -120)).unwrap_or(-120) as i32;
-    let release = args.get("release").map(|v| cu_core::js::js_truthy(v)).unwrap_or(true);
+    let scroll_pulses = args.get("scroll_pulses").and_then(Value::as_i64).unwrap_or(0) as i32;
+    let scroll_delta = match args.get("scroll_delta").and_then(Value::as_i64) {
+        Some(n) if n != 0 => n as i32,
+        _ => -120,
+    };
+    // PORT NOTE: origin `args.release !== false` (estricto).
+    let release = args.get("release") != Some(&Value::Bool(false));
 
     // Ejecutar gesto.
     let mut modifiers_applied: Vec<String> = Vec::new();
@@ -533,7 +547,8 @@ fn handle_drag_scroll(args: &Value) -> ToolOut {
     unsafe {
         // press modifiers
         for m in &modifiers {
-            let vk = match m.to_lowercase().as_str() {
+            // PORT NOTE: C# GetVk hace ToLower().Trim(); modifiers_applied guarda el texto original.
+            let vk = match m.trim().to_lowercase().as_str() {
                 "ctrl" | "control" => 0x11u8,
                 "shift" => 0x10u8,
                 "alt" => 0x12u8,
@@ -556,8 +571,9 @@ fn handle_drag_scroll(args: &Value) -> ToolOut {
         for i in 1..=steps {
             let t = i as f64 / steps as f64;
             let smooth = t * t * (3.0 - 2.0 * t);
-            let cur_x = (from_x as f64 + (to_x - from_x) as f64 * smooth).round() as i32;
-            let cur_y = (from_y as f64 + (to_y - from_y) as f64 * smooth).round() as i32;
+            // PORT NOTE: C# Math.Round (mitad al par).
+            let cur_x = (from_x as f64 + (to_x - from_x) as f64 * smooth).round_ties_even() as i32;
+            let cur_y = (from_y as f64 + (to_y - from_y) as f64 * smooth).round_ties_even() as i32;
             let _ = SetCursorPos(cur_x, cur_y);
             thread::sleep(Duration::from_millis(delay_ms as u64));
         }
@@ -612,16 +628,12 @@ fn handle_drag_scroll(args: &Value) -> ToolOut {
     res.insert("modifiers_applied".to_string(), json!(modifiers_applied));
     res.insert("steps".to_string(), json!(steps));
     res.insert("pulses_sent".to_string(), json!(pulses_sent));
+    // PORT NOTE: ConvertTo-Json de PowerShell incluye "error": null al final (propiedad sin valor).
+    res.insert("error".to_string(), Value::Null);
 
+    // PORT NOTE: index.js hace currentEpoch++ antes de dragScroll.handle (el epoch no va en el payload).
+    cu_core::epoch::bump();
     ToolOut::Json(Value::Object(res), false)
-}
-
-fn arg_f64(args: &Value, key: &str) -> Option<f64> {
-    match args.get(key) {
-        Some(Value::Number(n)) => n.as_f64(),
-        Some(Value::String(s)) => s.trim().parse::<f64>().ok(),
-        _ => None,
-    }
 }
 
 // Presencia de clave en el sentido del origen (`args.x !== undefined`): null cuenta como presente.
@@ -950,15 +962,14 @@ fn native_human_drag(args: &Value) {
     unsafe { mouse_event(down, 0, 0, 0, 0); }
     thread::sleep(Duration::from_millis(rng.range(50, 110) as u64));
     let dist = ((to_x - from_x) as f64).hypot((to_y - from_y) as f64);
-    let steps = (dist / 22.0).max(10.0).min(28.0) as i32;
-    let steps = steps.max(10);
+    let steps = ps_int(dist / 22.0).max(10).min(28);
     for i in 1..=steps {
         let t = i as f64 / steps as f64;
         let smooth = t * t * (3.0 - 2.0 * t);
         let jx = if i < steps { rng.range(-3, 3) } else { 0 };
         let jy = if i < steps { rng.range(-3, 3) } else { 0 };
-        let cur_x = (from_x as f64 + (to_x - from_x) as f64 * smooth) as i32 + jx;
-        let cur_y = (from_y as f64 + (to_y - from_y) as f64 * smooth) as i32 + jy;
+        let cur_x = ps_int(from_x as f64 + (to_x - from_x) as f64 * smooth) + jx;
+        let cur_y = ps_int(from_y as f64 + (to_y - from_y) as f64 * smooth) + jy;
         unsafe { let _ = SetCursorPos(cur_x, cur_y); }
         thread::sleep(Duration::from_millis(rng.range(8, 22) as u64));
     }
@@ -1140,25 +1151,22 @@ fn handle_scroll(args: &Value) -> ToolOut {
     ToolOut::Json(json!({"ok": true, "action": "scroll", "behavior": behavior, "epoch": epoch}), false)
 }
 
+// PORT NOTE: origin computer_type no enfoca la ventana. jitter = plan.mode==="humanized" || human_jitter===true.
 fn handle_type(args: &Value) -> ToolOut {
-    if let Some(tw) = args.get("target_window") {
-        if !tw.is_null() { unsafe { focus_window(tw) }; }
-    }
     let mut plain_text = args.get("text").map(cu_core::js::js_string_of).unwrap_or_default();
-    let is_secret = args.get("is_secret").map(|v| cu_core::js::js_truthy(v)).unwrap_or(false)
-        || args.get("secret_b64").is_some();
-    if let Some(b64) = args.get("secret_b64").and_then(Value::as_str) {
-        if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(b64) {
-            plain_text = String::from_utf8_lossy(&bytes).to_string();
+    let is_secret = truthy(args, "is_secret") || truthy(args, "secret_b64");
+    if truthy(args, "secret_b64") {
+        if let Some(b64) = args.get("secret_b64").and_then(Value::as_str) {
+            if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(b64) {
+                plain_text = String::from_utf8_lossy(&bytes).to_string();
+            }
         }
     }
-    let clear_first = args.get("clear_first").map(|v| cu_core::js::js_truthy(v)).unwrap_or(false);
-    if clear_first {
+    if truthy(args, "clear_first") {
         native_key_action("a", "tap", &["ctrl".to_string()]);
         native_key_action("Backspace", "tap", &[]);
     }
-    let jitter = args.get("human_jitter").map(|v| cu_core::js::js_truthy(v)).unwrap_or(false)
-        || args.get("human_like").map(|v| cu_core::js::js_truthy(v)).unwrap_or(false)
+    let jitter = args.get("human_jitter") == Some(&Value::Bool(true))
         || args.get("behavior").and_then(Value::as_str) == Some("humanized");
 
     if jitter {
@@ -1285,16 +1293,104 @@ mod tests {
     }
 
     #[test]
-    fn accepts_subsets() {
-        use serde_json::json;
-        assert!(accepts("computer_click", &json!({"x": 10, "y": 20})));
-        assert!(!accepts("computer_click", &json!({"x": 10, "y": 20, "id": 5})));
+    fn behavior_auto_is_not_accepted() {
+        // P0 F7: behavior "auto" (o ausente) lo resuelve el origen por ventana/UIA/env => proxy.
+        let auto = json!({"x": 10, "y": 20, "behavior": "auto"});
+        let absent = json!({"x": 10, "y": 20});
+        for tool in ["computer_click", "computer_double_click", "computer_scroll", "computer_type"] {
+            assert!(!accepts(tool, &auto), "{tool} acepta auto");
+            assert!(!accepts(tool, &absent), "{tool} acepta behavior ausente");
+        }
+        let drag_auto = json!({"fromX": 1, "fromY": 2, "toX": 3, "toY": 4, "behavior": "auto"});
+        assert!(!accepts("computer_drag", &drag_auto));
+        assert!(!accepts("computer_drag", &json!({"fromX": 1, "fromY": 2, "toX": 3, "toY": 4})));
+    }
+
+    #[test]
+    fn explicit_behavior_accepted() {
+        assert!(accepts("computer_click", &json!({"x": 10, "y": 20, "behavior": "foreground"})));
+        assert!(accepts("computer_click", &json!({"x": 10, "y": 20, "behavior": "humanized"})));
         assert!(!accepts("computer_click", &json!({"x": 10, "y": 20, "behavior": "headless"})));
-        assert!(accepts("computer_type", &json!({"text": "hi"})));
-        assert!(!accepts("computer_type", &json!({"text": "hi", "id": 3})));
-        assert!(!accepts("computer_bulk_input", &json!({"rows": [[1]], "target_text": "x"})));
-        assert!(accepts("computer_bulk_input", &json!({"rows": [[1]], "target_x": 5, "target_y": 6, "target_text": "x"})));
+        assert!(!accepts("computer_click", &json!({"x": 10, "y": 20, "behavior": "Foreground"})));
+        assert!(accepts("computer_type", &json!({"text": "hi", "behavior": "foreground"})));
+        assert!(!accepts("computer_type", &json!({"text": "hi", "behavior": "foreground", "id": 3})));
+        assert!(accepts("computer_drag", &json!({"fromX": 1, "fromY": 2, "toX": 3, "toY": 4, "behavior": "foreground"})));
+        assert!(accepts("computer_scroll", &json!({"dy": -120, "behavior": "humanized"})));
+    }
+
+    #[test]
+    fn click_rejects_non_integer_and_flags() {
+        let base = json!({"behavior": "foreground"});
+        let mut f = base.clone();
+        f["x"] = json!(10.5);
+        f["y"] = json!(20);
+        assert!(!accepts("computer_click", &f));
+        let mut s = base.clone();
+        s["x"] = json!("10");
+        s["y"] = json!(20);
+        assert!(!accepts("computer_click", &s));
+        let mut h = base.clone();
+        h["x"] = json!(10);
+        h["y"] = json!(20);
+        h["human_like"] = json!("true");
+        assert!(!accepts("computer_click", &h));
+        let mut b = base.clone();
+        b["x"] = json!(10);
+        b["y"] = json!(20);
+        b["button"] = json!("RIGHT");
+        assert!(!accepts("computer_click", &b));
+        let mut sn = base;
+        sn["x"] = json!(10);
+        sn["y"] = json!(20);
+        sn["snapshot_after"] = json!(true);
+        assert!(!accepts("computer_click", &sn));
+    }
+
+    #[test]
+    fn blocked_password_manager_target_is_not_accepted() {
+        let v = json!({"x": 1, "y": 2, "behavior": "foreground", "target_window": "Bitwarden - Vault"});
+        assert!(!accepts("computer_click", &v));
+        assert!(!accepts("computer_human_click", &json!({"x": 1, "y": 2, "target_window": "1Password"})));
+        assert!(!accepts("computer_copy", &json!({"target_window": "KeePass"})));
+        assert!(accepts("computer_copy", &json!({"target_window": "Notepad"})));
+    }
+
+    #[test]
+    fn type_rejects_control_chars_and_unsupported_flags() {
+        assert!(!accepts("computer_type", &json!({"text": "a\nb", "behavior": "foreground"})));
+        assert!(!accepts("computer_type", &json!({"text": "hi", "behavior": "foreground", "snapshot_after": true})));
+        assert!(!accepts("computer_type", &json!({"text": "hi", "behavior": "foreground", "human_jitter": "yes"})));
+        assert!(!accepts("computer_type", &json!({"secret_b64": "%%%", "behavior": "foreground"})));
+        assert!(accepts("computer_type", &json!({"secret_b64": "aGk=", "behavior": "foreground"})));
+    }
+
+    #[test]
+    fn hotkey_requires_string_combo() {
+        assert!(accepts("computer_hotkey", &json!({"combo": "ctrl+c"})));
+        assert!(!accepts("computer_hotkey", &json!({"combo": 0})));
+        assert!(!accepts("computer_hotkey", &json!({"combo": "  "})));
+    }
+
+    #[test]
+    fn bulk_input_cells_and_target_text() {
+        assert!(accepts("computer_bulk_input", &json!({"rows": [["a", 1, null]]})));
+        assert!(!accepts("computer_bulk_input", &json!({"rows": [[true]]})));
+        assert!(!accepts("computer_bulk_input", &json!({"rows": [["a"]], "target_text": "x"})));
+        assert!(!accepts("computer_bulk_input", &json!({"rows": [["a"]], "target_x": 0, "target_y": 0, "target_text": "x"})));
+        assert!(accepts("computer_bulk_input", &json!({"rows": [["a"]], "target_x": 5, "target_y": 6, "target_text": "x"})));
+    }
+
+    #[test]
+    fn drag_scroll_accepts_negative_steps_as_default() {
+        assert!(accepts("computer_drag_scroll", &json!({"from_x": 1, "from_y": 2, "to_x": 3, "to_y": 4, "steps": -5})));
+        assert!(!accepts("computer_drag_scroll", &json!({"from_x": 1.5, "from_y": 2, "to_x": 3, "to_y": 4})));
+    }
+
+    #[test]
+    fn unsupported_tools_are_not_accepted() {
         assert!(!accepts("computer_fill_form", &json!({})));
         assert!(!accepts("computer_scroll_to_text", &json!({"text":"x"})));
+        assert!(!accepts("computer_click_text", &json!({"text":"x"})));
+        assert!(!accepts("computer_upload_file", &json!({"file_path":"x"})));
     }
 }

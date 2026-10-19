@@ -133,7 +133,7 @@ async fn run() -> anyhow::Result<()> {
                         {
                             if let Ok(payload) = serde_json::from_str::<Value>(text) {
                                 if let Some(ep) = payload.get("epoch").and_then(Value::as_u64) {
-                                    cu_core::epoch::set(ep);
+                                    cu_core::epoch::adopt(ep);
                                 }
                             }
                         }
@@ -204,24 +204,27 @@ async fn run() -> anyhow::Result<()> {
                             .cloned()
                             .unwrap_or_else(|| json!({}));
                         // 1) Bloqueo de gestores de contraseñas (origen index.js:4463, ANTES del
-                        // hook de macros). El puente lo aplica a lo nativo; el hijo a lo proxeado.
-                        let target_win = args_value
-                            .get("target_window")
-                            .or_else(|| args_value.get("app"))
-                            .and_then(Value::as_str)
-                            .unwrap_or("")
-                            .trim()
-                            .to_string();
-                        if !target_win.is_empty()
-                            && cu_core::blocked::is_app_blocked(&target_win)
+                        // hook de macros). El target se elige como en el origen:
+                        // `args.target_window || args.app` (truthiness de JS: "" no cuenta).
+                        let target_raw = cu_core::blocked::js_truthy_string(
+                            args_value.get("target_window"),
+                        )
+                        .or_else(|| cu_core::blocked::js_truthy_string(args_value.get("app")))
+                        .unwrap_or_default();
+                        if !target_raw.is_empty()
+                            && cu_core::blocked::is_app_blocked(&target_raw)
                         {
-                            let payload = cu_core::blocked::app_blocked_payload(&target_win);
+                            let payload = cu_core::blocked::app_blocked_payload(&target_raw);
                             let text = serde_json::to_string(&payload)?;
                             let resp = json!({"jsonrpc":"2.0","id":msg.get("id").cloned().unwrap_or(Value::Null),"result":{
                                 "content":[{"type":"text","text":text}],
                                 "isError":true
                             }});
                             respond_value(&mut stdout, &resp).await?;
+                            // El origen registra el incidente de todo resultado con isError.
+                            if let Some(last) = LAST_RESULT.lock().ok().and_then(|s| s.clone()) {
+                                record_native_incident(name, &args_value, &last, 0);
+                            }
                             continue;
                         }
                         // 2) Grabación de macros (origen index.js:4471): registra TODO tool call
@@ -240,11 +243,15 @@ async fn run() -> anyhow::Result<()> {
                             cu_core::macros::note_step(name, &args_value);
                         }
                         // 3) Lock multi-agente para lo que sirve el puente (lo proxeado lo toma
-                        //    el hijo). Mismo plan que el origen (planLock).
-                        let mut lock_owner: Option<String> = None;
-                        let mut lock_scope: Option<String> = None;
-                        let mut heartbeat: Option<tokio::task::JoinHandle<()>> = None;
-                        if bridge_serves_native(name, &args_value) {
+                        //    el hijo). Mismo plan que el origen (planLock). El lote y el replay NO
+                        //    se bloquean completos: sus sub-llamadas llegan al hijo, que tomaría
+                        //    el mismo scope (auto-bloqueo); cada sub-llamada nativa se bloquea
+                        //    sola, como las internas del origen.
+                        let mut guard = LockGuard::default();
+                        if bridge_serves_native(name, &args_value)
+                            && name != "computer_batch"
+                            && name != "computer_macro_replay"
+                        {
                             if let Some(plan) = cu_core::plan::plan_lock(name, &args_value) {
                                 let acquired = cu_core::lock::acquire(
                                     Some(&Value::String(plan.scope.clone())),
@@ -259,28 +266,42 @@ async fn run() -> anyhow::Result<()> {
                                     record_lock_incident(name, &args_value, &acquired);
                                     continue;
                                 }
-                                lock_scope = Some(plan.scope.clone());
-                                lock_owner = acquired
+                                guard.scope = Some(plan.scope.clone());
+                                guard.owner = acquired
                                     .pointer("/owner/id")
                                     .and_then(Value::as_str)
                                     .map(|s| s.to_string());
-                                if let Some(owner) = lock_owner.clone() {
+                                if let Some(owner) = guard.owner.clone() {
                                     let ttl = cu_core::lock::default_ttl_ms();
                                     let interval =
                                         std::cmp::max(2000u64, (ttl.max(1) as u64) / 3);
-                                    heartbeat = Some(tokio::spawn(async move {
+                                    guard.heartbeat = Some(tokio::spawn(async move {
                                         loop {
                                             tokio::time::sleep(std::time::Duration::from_millis(
                                                 interval,
                                             ))
                                             .await;
                                             let ttl_v = Value::from(ttl);
-                                            cu_core::lock::extend(&owner, Some(&ttl_v), None);
+                                            let res =
+                                                cu_core::lock::extend(&owner, Some(&ttl_v), None);
+                                            if res.get("ok") != Some(&Value::Bool(true)) {
+                                                tracing::warn!(
+                                                    "lock heartbeat fallo para {owner}: {res}"
+                                                );
+                                            }
                                         }
                                     }));
                                 }
                             }
                         }
+                        // Si el cliente pidió ejecución por task (params.task del SDK o
+                        // async:true), el tool se proxea al hijo: el protocolo de tasks vive
+                        // en el origen (index.js:6778).
+                        let has_task = msg.pointer("/params/task").is_some()
+                            || args_value
+                                .get("async")
+                                .and_then(Value::as_bool)
+                                .unwrap_or(false);
                         // El origen registra el incidente de todo tool que falla (isError).
                         let started = std::time::Instant::now();
                         if let Ok(mut slot) = LAST_RESULT.lock() {
@@ -316,10 +337,11 @@ async fn run() -> anyhow::Result<()> {
                         {
                             native_macros(&msg, &mut stdout).await?;
                         } else if CU_EXEC_READY
+                            && !has_task
                             && (name == "computer_batch" || name == "computer_macro_replay")
                         {
                             native_exec(&msg, &mut stdout).await?;
-                        } else if {
+                        } else if !has_task && {
                             let null_args = Value::Null;
                             let cargs = msg
                                 .get("params")
@@ -355,13 +377,7 @@ async fn run() -> anyhow::Result<()> {
                                 record_native_incident(name, &args_value, &resp, duration_ms);
                             }
                         }
-                        // 4) Liberación del lock (el origen libera siempre al terminar).
-                        if let Some(hb) = heartbeat {
-                            hb.abort();
-                        }
-                        if let (Some(owner), Some(scope)) = (lock_owner, lock_scope) {
-                            cu_core::lock::release(Some(&owner), Some(&scope), None);
-                        }
+                        // El lock se libera solo: el guard (LockGuard) lo hace al salir del brazo.
                     }
                     _ => {
                         if is_request && child_in.is_none() {
@@ -764,8 +780,8 @@ async fn native_clipboard(msg: &Value, stdout: &mut tokio::io::Stdout) -> anyhow
     let r = tokio::task::spawn_blocking(move || cu_native::system::clipboard_set(&text_to_set)).await?;
     match r {
         Ok(()) => {
-            // PORT NOTE: el origen NO incrementa el epoch en computer_clipboard.
-            let epoch = cu_core::epoch::current();
+            // El origen incrementa el epoch al completar el clipboard_set (index.js:5870).
+            let epoch = cu_core::epoch::bump();
             let text = serde_json::to_string(
                 &json!({ "ok": true, "action": "clipboard_set", "epoch": epoch }),
             )?;
@@ -817,6 +833,16 @@ async fn native_lock(msg: &Value, stdout: &mut tokio::io::Stdout) -> anyhow::Res
     respond_value(stdout, &resp).await
 }
 
+// ¿Algún cluster del puente sirve este tool de forma nativa?
+fn cluster_handles(name: &str, args: &Value) -> bool {
+    (cu_uia::handles(name) && cu_uia::accepts(name, args))
+        || (cu_input::handles(name) && cu_input::accepts(name, args))
+        || (cu_winops::handles(name) && cu_winops::accepts(name, args))
+        || (cu_misc::handles(name) && cu_misc::accepts(name, args))
+        || (cu_shell::handles(name) && cu_shell::accepts(name, args))
+        || (cu_ocr::handles(name) && cu_ocr::accepts(name, args))
+}
+
 // ¿El puente sirve este tool de forma nativa? (para el lock multi-agente: lo proxeado
 // lo bloquea el propio hijo).
 fn bridge_serves_native(name: &str, args: &Value) -> bool {
@@ -844,12 +870,7 @@ fn bridge_serves_native(name: &str, args: &Value) -> bool {
     if CU_EXEC_READY && (name == "computer_batch" || name == "computer_macro_replay") {
         return true;
     }
-    (cu_uia::handles(name) && cu_uia::accepts(name, args))
-        || (cu_input::handles(name) && cu_input::accepts(name, args))
-        || (cu_winops::handles(name) && cu_winops::accepts(name, args))
-        || (cu_misc::handles(name) && cu_misc::accepts(name, args))
-        || (cu_shell::handles(name) && cu_shell::accepts(name, args))
-        || (cu_ocr::handles(name) && cu_ocr::accepts(name, args))
+    cluster_handles(name, args)
 }
 
 // Respuesta de "lock ocupado" (espejo de busyResult del origen).
@@ -912,13 +933,40 @@ fn iso_from_epoch_ms(ms: i64) -> String {
     cu_core::incidents::iso_from_ms_pub(ms)
 }
 
+// Guard del lock multi-agente: libera el scope y corta el heartbeat en CUALQUIER salida
+// del brazo (incluidos los `?` tempranos), como el `finally` del origen.
+#[derive(Default)]
+struct LockGuard {
+    owner: Option<String>,
+    scope: Option<String>,
+    heartbeat: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl Drop for LockGuard {
+    fn drop(&mut self) {
+        if let Some(hb) = self.heartbeat.take() {
+            hb.abort();
+        }
+        if let (Some(owner), Some(scope)) = (self.owner.take(), self.scope.take()) {
+            cu_core::lock::release(Some(&owner), Some(&scope), None);
+        }
+    }
+}
+
 // Registra un incidente por el resultado de un tool nativo (espejo de recordIncidentSafe).
 fn record_native_incident(tool: &str, args: &Value, resp: &Value, duration_ms: i64) {
+    // El propio journal/lock no se auto-instrumentan (recordIncidentSafe del origen).
+    if tool == "computer_lock" || tool == "computer_incidents" {
+        return;
+    }
+    // El origen registra el OBJETO RESULT (CallToolResult: {content, isError}), no el sobre
+    // JSON-RPC — el detector de error del journal mira result["isError"].
+    let result = resp.get("result").cloned().unwrap_or_else(|| resp.clone());
     cu_core::incidents::record_incident(cu_core::incidents::IncidentRecord {
         tool,
         args,
         error: None,
-        result: Some(resp),
+        result: Some(&result),
         duration_ms: Some(duration_ms as f64),
         version: "",
         session_id: None,
@@ -942,30 +990,6 @@ fn record_lock_incident(name: &str, args: &Value, fail: &Value) {
     });
 }
 
-// Convierte un ToolOut de error en el "result" que consume cu_core::incidents.
-fn cluster_error_result(out: &cu_core::out::ToolOut) -> Option<Value> {
-    let payload = match out {
-        cu_core::out::ToolOut::Json(p, err) | cu_core::out::ToolOut::JsonStructured(p, err) => {
-            if !err {
-                return None;
-            }
-            p.clone()
-        }
-        cu_core::out::ToolOut::Raw(s, err) => {
-            if !err {
-                return None;
-            }
-            Value::String(s.clone())
-        }
-        cu_core::out::ToolOut::Image { .. } | cu_core::out::ToolOut::Link { .. } => return None,
-    };
-    let text = match &payload {
-        Value::String(s) => s.clone(),
-        other => serde_json::to_string(other).unwrap_or_default(),
-    };
-    Some(json!({"isError": true, "content": [{"type": "text", "text": text}]}))
-}
-
 async fn native_cluster(
     name: &str,
     msg: &Value,
@@ -979,7 +1003,6 @@ async fn native_cluster(
         respond_raw(stdout, &note.to_string()).await?;
     }
     let args = msg["params"]["arguments"].clone();
-    let args_rec = args.clone();
     let id = msg.get("id").cloned().unwrap_or(Value::Null);
     let name_owned = name.to_string();
     let out = tokio::task::spawn_blocking(move || {
@@ -998,20 +1021,7 @@ async fn native_cluster(
         }
     })
     .await?;
-    // Incidents: los errores de clusters nativos se registran en el puente (igual que el
-    // dispatch del origen); cuando la llamada se proxea, la registra el hijo.
-    if let Some(result_v) = cluster_error_result(&out) {
-        cu_core::incidents::record_incident(cu_core::incidents::IncidentRecord {
-            tool: name,
-            args: &args_rec,
-            error: None,
-            result: Some(&result_v),
-            duration_ms: None,
-            version: "",
-            session_id: None,
-            dir: None,
-        });
-    }
+    // El incidente lo registra el hook central del dispatch (una sola vez, con duración).
     let resp = match out {
         cu_core::out::ToolOut::Json(p, err) => {
             let text = serde_json::to_string(&p)?;
@@ -1199,11 +1209,24 @@ impl SyncChild {
                 .get("isError")
                 .and_then(Value::as_bool)
                 .unwrap_or(false);
+            // El origen puede devolver primero un bloque de imagen y después el texto:
+            // se toma el PRIMER bloque de tipo texto (no el índice 0).
             let text = result
-                .pointer("/content/0/text")
-                .and_then(Value::as_str)
+                .get("content")
+                .and_then(Value::as_array)
+                .and_then(|blocks| {
+                    blocks
+                        .iter()
+                        .find(|b| b.get("type").and_then(Value::as_str) == Some("text"))
+                        .and_then(|b| b.get("text"))
+                        .and_then(Value::as_str)
+                })
                 .unwrap_or("");
             let payload: Value = serde_json::from_str(text).unwrap_or(Value::Null);
+            // Adopta el epoch del hijo (monótono) para mantener un único contador.
+            if let Some(ep) = payload.get("epoch").and_then(Value::as_u64) {
+                cu_core::epoch::adopt(ep);
+            }
             return Ok((payload, is_error));
         }
         Err("timeout en sub-llamada".to_string())
@@ -1259,17 +1282,51 @@ fn native_macro_call(tool: &str, args: &Value) -> Option<(Value, bool)> {
 
 struct BridgeExec {
     child: Arc<std::sync::Mutex<Option<SyncChild>>>,
-    // Progress del replay/batch: el Executor acumula las notificaciones y el handler
-    // las emite antes de la respuesta final (el origen emite una por paso).
-    progress: Arc<std::sync::Mutex<Vec<Value>>>,
-    token: Option<Value>,
+    // Progress del replay/batch: la notificación se emite en el momento de la sub-llamada
+    // (como el origen) a través de un canal que escribe a stdout.
+    progress: Option<(Value, tokio::sync::mpsc::UnboundedSender<String>)>,
     steps: Arc<AtomicU64>,
 }
 
 impl cu_exec::Executor for BridgeExec {
     fn call(&self, tool: &str, args: &Value) -> Result<(Value, bool), String> {
-        let res = if let Some(res) = native_cluster_call(tool, args) {
-            Ok(res)
+        // Progress: una notificación por sub-llamada, en el momento de la llamada.
+        if let Some((tok, tx)) = self.progress.as_ref() {
+            let step = self.steps.fetch_add(1, Ordering::SeqCst) + 1;
+            let note = json!({"jsonrpc":"2.0","method":"notifications/progress",
+                "params":{"progressToken":tok.clone(),"progress":step,
+                    "message":format!("{tool} (paso {step})")}});
+            let _ = tx.send(note.to_string());
+        }
+        let res = if cluster_handles(tool, args) {
+            // Sub-llamada nativa: el origen bloquea el scope de cada llamada interna. El
+            // lote completo NO se bloquea en el puente (el hijo tomaría el mismo scope y
+            // se auto-bloquearía).
+            let plan = cu_core::plan::plan_lock(tool, args);
+            let owner = match &plan {
+                Some(plan) => {
+                    let acquired = cu_core::lock::acquire(
+                        Some(&Value::String(plan.scope.clone())),
+                        tool,
+                        None,
+                        None,
+                        None,
+                    );
+                    if acquired.get("ok") != Some(&Value::Bool(true)) {
+                        return Err("busy".to_string());
+                    }
+                    acquired
+                        .pointer("/owner/id")
+                        .and_then(Value::as_str)
+                        .map(|s| s.to_string())
+                }
+                None => None,
+            };
+            let out = native_cluster_call(tool, args).unwrap_or((Value::Null, false));
+            if let (Some(owner), Some(plan)) = (owner, plan) {
+                cu_core::lock::release(Some(&owner), Some(&plan.scope), None);
+            }
+            Ok(out)
         } else if let Some(res) = native_macro_call(tool, args) {
             Ok(res)
         } else {
@@ -1280,15 +1337,6 @@ impl cu_exec::Executor for BridgeExec {
             let child = guard.as_mut().ok_or("hijo no disponible")?;
             child.call(tool, args)
         };
-        if let Some(tok) = self.token.as_ref() {
-            let step = self.steps.fetch_add(1, Ordering::SeqCst) + 1;
-            let note = json!({"jsonrpc":"2.0","method":"notifications/progress",
-                "params":{"progressToken":tok.clone(),"progress":step,
-                    "message":format!("{tool} (paso {step})")}});
-            if let Ok(mut g) = self.progress.lock() {
-                g.push(note);
-            }
-        }
         res
     }
 
@@ -1334,20 +1382,24 @@ async fn native_exec(msg: &Value, stdout: &mut tokio::io::Stdout) -> anyhow::Res
     let id = msg.get("id").cloned().unwrap_or(Value::Null);
     let name = msg["params"]["name"].as_str().unwrap_or("").to_string();
     let token = msg.pointer("/params/_meta/progressToken").cloned();
-    let progress: Arc<std::sync::Mutex<Vec<Value>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
+    // Canal de progreso: las notificaciones se escriben mientras corre la ejecución (el
+    // origen emite una por paso, antes de despacharlo).
+    let (prog_tx, mut prog_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let writer = tokio::spawn(async move {
+        let mut out = tokio::io::stdout();
+        while let Some(line) = prog_rx.recv().await {
+            let _ = respond_raw(&mut out, &line).await;
+        }
+    });
     let exec = BridgeExec {
         child: exec_child().clone(),
-        progress: progress.clone(),
-        token,
+        progress: token.map(|t| (t, prog_tx)),
         steps: Arc::new(AtomicU64::new(0)),
     };
     let out = tokio::task::spawn_blocking(move || cu_exec::handle_call(&name, &args, &exec)).await?;
-    // Las notificaciones de progreso se emiten antes de la respuesta final.
-    if let Ok(notes) = progress.lock() {
-        for note in notes.iter() {
-            respond_raw(stdout, &note.to_string()).await?;
-        }
-    }
+    // El canal se cierra al terminar el executor; se espera al escritor para que las
+    // notificaciones salgan antes de la respuesta final.
+    let _ = writer.await;
     let resp = match out {
         cu_core::out::ToolOut::Json(p, err) => {
             let text = serde_json::to_string(&p)?;

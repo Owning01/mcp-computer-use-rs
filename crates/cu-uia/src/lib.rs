@@ -857,6 +857,20 @@ fn last_fp() -> &'static Mutex<Option<String>> {
     LAST_FP.get_or_init(|| Mutex::new(None))
 }
 
+fn lock_snapshot_state() -> std::sync::MutexGuard<'static, SnapshotState> {
+    match snapshot_state().lock() {
+        Ok(g) => g,
+        Err(e) => e.into_inner(),
+    }
+}
+
+fn lock_last_fp() -> std::sync::MutexGuard<'static, Option<String>> {
+    match last_fp().lock() {
+        Ok(g) => g,
+        Err(e) => e.into_inner(),
+    }
+}
+
 // ---------------- to_public_element ----------------
 
 fn to_public_element(
@@ -970,7 +984,10 @@ fn handle_inspect_ui(args: &Value) -> ToolOut {
             }
         }
         if el.get("hwnd").is_some() {
-            node.insert("hwnd".into(), el.get("hwnd").cloned().unwrap());
+            node.insert(
+                "hwnd".into(),
+                el.get("hwnd").cloned().unwrap_or(Value::Null),
+            );
         }
         if el.get("disabled").and_then(as_bool) == Some(true) {}
         if el.get("enabled").and_then(as_bool) == Some(false) {
@@ -1034,7 +1051,7 @@ fn handle_snapshot(args: &Value) -> ToolOut {
     if !collected.ok {
         // return error response like origin
         let h = collected.hwnd;
-        let st = snapshot_state().lock().unwrap();
+        let st = lock_snapshot_state();
         let generation = st.generation;
         let payload = json!({
             "ok": false,
@@ -1057,7 +1074,7 @@ fn handle_snapshot(args: &Value) -> ToolOut {
         .map(|(idx, el)| to_public_element(el, idx + 1, include_patterns))
         .collect();
 
-    let mut st = snapshot_state().lock().unwrap();
+    let mut st = lock_snapshot_state();
     let same_window = st.hwnd == hwnd && hwnd != 0;
     let generation_matches = match generation_arg {
         None => true,
@@ -1195,7 +1212,7 @@ fn handle_state_fingerprint(args: &Value) -> ToolOut {
         collected.pid,
         collected.hwnd,
     );
-    *last_fp().lock().unwrap() = Some(fp.clone());
+    *lock_last_fp() = Some(fp.clone());
     let payload = json!({
         "ok": true,
         "fingerprint": fp,
@@ -1254,12 +1271,12 @@ fn handle_verify(args: &Value) -> ToolOut {
                 initial_fp = Some(fp.clone());
             }
             current_fp = Some(fp.clone());
-            let prev_fp = last_fp().lock().unwrap().clone();
+            let prev_fp = lock_last_fp().clone();
             let eval =
                 evaluate_expectation(&expect, &collected.elements, &window_title, &prev_fp, &fp);
             checks = eval.checks;
             if eval.all_pass {
-                *last_fp().lock().unwrap() = Some(fp.clone());
+                *lock_last_fp() = Some(fp.clone());
                 let payload = json!({
                     "ok": true,
                     "status": "confirmed",
@@ -1282,7 +1299,7 @@ fn handle_verify(args: &Value) -> ToolOut {
         "no_change"
     };
     if let Some(fp) = &current_fp {
-        *last_fp().lock().unwrap() = Some(fp.clone());
+        *lock_last_fp() = Some(fp.clone());
     }
     let payload = json!({
         "ok": true,
@@ -1473,7 +1490,7 @@ fn handle_map_ui(args: &Value) -> ToolOut {
 
 // ---------------- find_template ----------------
 
-fn capture_region_rgba(hwnd: i64) -> (i64, i64, image::RgbaImage) {
+fn capture_region_rgba(hwnd: i64) -> Result<(i64, i64, image::RgbaImage), String> {
     unsafe {
         use windows::Win32::Foundation::RECT as R;
         use windows::Win32::Graphics::Gdi::*;
@@ -1508,11 +1525,19 @@ fn capture_region_rgba(hwnd: i64) -> (i64, i64, image::RgbaImage) {
             oy = 0;
         }
         if w <= 0 || h <= 0 {
-            w = 1920;
-            h = 1080;
+            return Err("invalid_capture_dimensions".into());
         }
+
         let screen_dc = GetDC(None);
+        if screen_dc.0.is_null() {
+            return Err("get_dc_failed".into());
+        }
         let mem_dc = CreateCompatibleDC(Some(screen_dc));
+        if mem_dc.0.is_null() {
+            ReleaseDC(None, screen_dc);
+            return Err("create_compatible_dc_failed".into());
+        }
+
         let mut bmi = BITMAPINFO::default();
         bmi.bmiHeader = BITMAPINFOHEADER {
             biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
@@ -1524,10 +1549,23 @@ fn capture_region_rgba(hwnd: i64) -> (i64, i64, image::RgbaImage) {
             ..Default::default()
         };
         let mut bits: *mut std::ffi::c_void = std::ptr::null_mut();
-        let hbmp =
-            CreateDIBSection(Some(mem_dc), &bmi, DIB_RGB_COLORS, &mut bits, None, 0).unwrap();
+        let hbmp = match CreateDIBSection(Some(mem_dc), &bmi, DIB_RGB_COLORS, &mut bits, None, 0) {
+            Ok(bmp) => bmp,
+            Err(_) => {
+                let _ = DeleteDC(mem_dc);
+                ReleaseDC(None, screen_dc);
+                return Err("create_dib_section_failed".into());
+            }
+        };
         let old = SelectObject(mem_dc, hbmp.into());
-        let _ = BitBlt(
+        if old.0.is_null() {
+            let _ = DeleteObject(hbmp.into());
+            let _ = DeleteDC(mem_dc);
+            ReleaseDC(None, screen_dc);
+            return Err("select_object_failed".into());
+        }
+
+        let blt_ok = BitBlt(
             mem_dc,
             0,
             0,
@@ -1538,17 +1576,33 @@ fn capture_region_rgba(hwnd: i64) -> (i64, i64, image::RgbaImage) {
             oy as i32,
             SRCCOPY,
         );
-        let mut data = vec![0u8; (w * h * 4) as usize];
-        if !bits.is_null() {
-            std::ptr::copy_nonoverlapping(bits as *const u8, data.as_mut_ptr(), data.len());
+
+        let mut data = Vec::new();
+        if blt_ok.is_ok() && !bits.is_null() {
+            let len = (w as usize)
+                .checked_mul(h as usize)
+                .and_then(|v| v.checked_mul(4))
+                .unwrap_or(0);
+            if len > 0 {
+                data = vec![0u8; len];
+                std::ptr::copy_nonoverlapping(bits as *const u8, data.as_mut_ptr(), len);
+            }
         }
+
         let _ = SelectObject(mem_dc, old);
         let _ = DeleteObject(hbmp.into());
         let _ = DeleteDC(mem_dc);
         ReleaseDC(None, screen_dc);
+
+        if blt_ok.is_err() {
+            return Err("bitblt_failed".into());
+        }
+        if data.is_empty() {
+            return Err("capture_data_empty".into());
+        }
         let img = image::RgbaImage::from_raw(w as u32, h as u32, data)
             .unwrap_or_else(|| image::RgbaImage::new(1, 1));
-        (ox, oy, img)
+        Ok((ox, oy, img))
     }
 }
 
@@ -1581,7 +1635,10 @@ fn handle_find_template(args: &Value) -> ToolOut {
         Ok(d) => d.to_rgba8(),
         Err(_) => return ToolOut::Json(json!({"ok": false, "error": "invalid image"}), true),
     };
-    let (ox, oy, screen) = capture_region_rgba(hwnd);
+    let (ox, oy, screen) = match capture_region_rgba(hwnd) {
+        Ok(v) => v,
+        Err(e) => return ToolOut::Json(json!({"ok": false, "error": e, "message": e}), true),
+    };
 
     let sw = screen.width() as usize;
     let sh = screen.height() as usize;
@@ -2027,11 +2084,21 @@ fn vk_from_key(k: &str) -> u8 {
         "escape" | "esc" => 0x1B,
         "tab" => 0x09,
         "space" => 0x20,
-        s if s.len() == 1 && s.chars().next().unwrap().is_ascii_lowercase() => {
-            (0x41 + (s.chars().next().unwrap() as u8 - b'a')) as u8
+        s if s.len() == 1
+            && s.chars()
+                .next()
+                .map(|c| c.is_ascii_lowercase())
+                .unwrap_or(false) =>
+        {
+            (0x41 + (s.chars().next().unwrap_or('a') as u8 - b'a')) as u8
         }
-        s if s.len() == 1 && s.chars().next().unwrap().is_ascii_digit() => {
-            (0x30 + (s.chars().next().unwrap() as u8 - b'0')) as u8
+        s if s.len() == 1
+            && s.chars()
+                .next()
+                .map(|c| c.is_ascii_digit())
+                .unwrap_or(false) =>
+        {
+            (0x30 + (s.chars().next().unwrap_or('0') as u8 - b'0')) as u8
         }
         _ => 0,
     }
@@ -3201,7 +3268,7 @@ fn handle_wait_stable(args: &Value) -> ToolOut {
             current_fp = Some(fp.clone());
             window_title = collected.window_title.clone();
             if stable_count >= stable_samples {
-                *last_fp_store().lock().unwrap() = Some(fp.clone());
+                *lock_last_fp() = Some(fp.clone());
                 let payload = json!({
                     "ok": true,
                     "stable": true,
@@ -3219,7 +3286,7 @@ fn handle_wait_stable(args: &Value) -> ToolOut {
         std::thread::sleep(std::time::Duration::from_millis(interval_ms as u64));
     }
     if let Some(fp) = &current_fp {
-        *last_fp_store().lock().unwrap() = Some(fp.clone());
+        *lock_last_fp() = Some(fp.clone());
     }
     let payload = json!({
         "ok": true,
@@ -3231,11 +3298,6 @@ fn handle_wait_stable(args: &Value) -> ToolOut {
         "window_title": window_title
     });
     ToolOut::JsonStructured(payload, false)
-}
-
-// helper alias for last_fp static (already defined as last_fp())
-fn last_fp_store() -> &'static Mutex<Option<String>> {
-    last_fp()
 }
 
 // ---------------- fill_form ----------------
@@ -3708,10 +3770,20 @@ fn vk_from_key_extended(k: &str) -> u8 {
         "shift" => 0x10,
         "alt" => 0x12,
         "win" | "meta" | "super" | "cmd" => 0x5B,
-        s if s.len() == 1 && s.chars().next().unwrap_or('\0').is_ascii_lowercase() => {
+        s if s.len() == 1
+            && s.chars()
+                .next()
+                .map(|c| c.is_ascii_lowercase())
+                .unwrap_or(false) =>
+        {
             0x41 + (s.chars().next().unwrap_or('a') as u8 - b'a')
         }
-        s if s.len() == 1 && s.chars().next().unwrap_or('\0').is_ascii_digit() => {
+        s if s.len() == 1
+            && s.chars()
+                .next()
+                .map(|c| c.is_ascii_digit())
+                .unwrap_or(false) =>
+        {
             0x30 + (s.chars().next().unwrap_or('0') as u8 - b'0')
         }
         _ => 0,
@@ -4136,11 +4208,17 @@ pub fn accepts(name: &str, args: &Value) -> bool {
                 || args.get("name").is_some();
             has
         }
-        "computer_wait_stable" => false,
         "computer_read_selection" => true,
         "computer_observe" => !args.get("screenshot").and_then(as_bool).unwrap_or(false),
         "computer_ui_action" => args.get("ref").is_none(),
-        "computer_system_tray" => true,
+        "computer_system_tray" => {
+            // PORT NOTE: el overflow de bandeja no se enumera nativamente.
+            // Solo aceptamos llamadas que no requieran overflow; el resto va al hijo Node.
+            !args
+                .get("include_overflow")
+                .and_then(as_bool)
+                .unwrap_or(true)
+        }
         "computer_context_menu" => args.get("x").is_some() && args.get("y").is_some(),
         "computer_toast_action" => {
             args.get("action").and_then(as_str).unwrap_or("list") == "click_button"
@@ -4152,6 +4230,7 @@ pub fn accepts(name: &str, args: &Value) -> bool {
             .map(|s| !s.trim().is_empty())
             .unwrap_or(false),
         "computer_wait_stable" => {
+            // PORT NOTE: solo el camino síncrono es nativo; async/task sigue en el hijo Node.
             !args.get("async").and_then(as_bool).unwrap_or(false) && args.get("task").is_none()
         }
         "computer_fill_form" => args
@@ -4408,5 +4487,36 @@ mod tests {
             }
             _ => panic!("expected Json"),
         }
+    }
+
+    #[test]
+    fn accepts_system_tray_overflow_default_false() {
+        // include_overflow default es true en el origen; nosotros no lo soportamos nativo.
+        let args = json!({"action": "list"});
+        assert!(!accepts("computer_system_tray", &args));
+    }
+
+    #[test]
+    fn accepts_system_tray_no_overflow_true() {
+        let args = json!({"action": "list", "include_overflow": false});
+        assert!(accepts("computer_system_tray", &args));
+    }
+
+    #[test]
+    fn accepts_wait_stable_sync_true() {
+        let args = json!({"timeout_ms": 1000});
+        assert!(accepts("computer_wait_stable", &args));
+    }
+
+    #[test]
+    fn accepts_wait_stable_async_false() {
+        let args = json!({"async": true});
+        assert!(!accepts("computer_wait_stable", &args));
+    }
+
+    #[test]
+    fn accepts_wait_stable_task_false() {
+        let args = json!({"task": "t1"});
+        assert!(!accepts("computer_wait_stable", &args));
     }
 }
