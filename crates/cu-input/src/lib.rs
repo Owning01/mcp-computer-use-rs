@@ -261,6 +261,7 @@ pub fn handles(name: &str) -> bool {
             | "computer_drag"
             | "computer_scroll"
             | "computer_type"
+            | "computer_handle_file_dialog"
     )
 }
 
@@ -279,6 +280,7 @@ pub fn handle_call(name: &str, args: &Value) -> ToolOut {
         "computer_drag" => handle_drag(args),
         "computer_scroll" => handle_scroll(args),
         "computer_type" => handle_type(args),
+        "computer_handle_file_dialog" => handle_file_dialog(args),
         _ => ToolOut::Json(json!({"ok": false, "error": "not_implemented"}), true),
     }));
     match result {
@@ -691,7 +693,8 @@ pub fn accepts(name: &str, args: &Value) -> bool {
             }
             true
         }
-        "computer_fill_form" | "computer_scroll_to_text" => false,
+        "computer_fill_form" | "computer_scroll_to_text" | "computer_click_text" | "computer_upload_file" => false,
+        "computer_handle_file_dialog" => args.get("file_path").map(|v| !cu_core::js::js_string_of(v).trim().is_empty()).unwrap_or(false),
         _ => false,
     }
 }
@@ -1035,6 +1038,76 @@ fn handle_type(args: &Value) -> ToolOut {
     let epoch = cu_core::epoch::bump();
     let behavior = if jitter { "humanized" } else { "foreground" };
     ToolOut::Json(json!({"ok": true, "action": "type", "secret": is_secret, "behavior": behavior, "human_jitter": jitter, "epoch": epoch}), false)
+}
+
+fn handle_file_dialog(args: &Value) -> ToolOut {
+    let file_path = args.get("file_path").map(cu_core::js::js_string_of).unwrap_or_default().trim().to_string();
+    if file_path.is_empty() {
+        return ToolOut::Json(json!({"ok": false, "error": "file_path parameter is required"}), true);
+    }
+    let action = args.get("action").map(cu_core::js::js_string_of).unwrap_or_else(|| "save".to_string());
+
+    // Buscar diálogo #32770.
+    let mut found = HWND(std::ptr::null_mut());
+    unsafe {
+        struct Ctx { found: HWND }
+        unsafe extern "system" fn cb(hwnd: HWND, lparam: LPARAM) -> windows::core::BOOL {
+            unsafe {
+                let ctx = &mut *(lparam.0 as *mut Ctx);
+                let mut buf = [0u16; 256];
+                let n = GetClassNameW(hwnd, &mut buf);
+                if n > 0 {
+                    let class = String::from_utf16_lossy(&buf[..n as usize]);
+                    if class == "#32770" {
+                        let mut tbuf = [0u16; 256];
+                        let tn = GetWindowTextW(hwnd, &mut tbuf);
+                        let title = String::from_utf16_lossy(&tbuf[..tn.max(0) as usize]).to_lowercase();
+                        if title.contains("guardar") || title.contains("save") || title.contains("abrir")
+                            || title.contains("open") || title.contains("subir") || title.contains("upload")
+                            || title.contains("select") || title.contains("elegir")
+                        {
+                            ctx.found = hwnd;
+                            return windows::core::BOOL(0);
+                        }
+                    }
+                }
+                windows::core::BOOL(1)
+            }
+        }
+        let mut ctx = Ctx { found: HWND(std::ptr::null_mut()) };
+        let _ = EnumWindows(Some(cb), LPARAM(&mut ctx as *mut _ as isize));
+        if !ctx.found.0.is_null() {
+            found = ctx.found;
+        } else {
+            let fg = GetForegroundWindow();
+            let mut cbuf = [0u16; 256];
+            let cn = GetClassNameW(fg, &mut cbuf);
+            if cn > 0 {
+                let class = String::from_utf16_lossy(&cbuf[..cn as usize]);
+                if class == "#32770" {
+                    found = fg;
+                }
+            }
+        }
+    }
+
+    if found.0.is_null() {
+        return ToolOut::Json(json!({"ok": false, "error": "file_dialog_not_found"}), true);
+    }
+
+    unsafe {
+        let _ = SetForegroundWindow(found);
+    }
+    thread::sleep(Duration::from_millis(80));
+
+    let _ = cu_native::system::clipboard_set(&file_path);
+    thread::sleep(Duration::from_millis(30));
+    native_key_action("v", "tap", &["ctrl".to_string()]);
+    thread::sleep(Duration::from_millis(120));
+    native_key_action("Enter", "tap", &[]);
+
+    let epoch = cu_core::epoch::bump();
+    ToolOut::Json(json!({"ok": true, "dialog_hwnd": found.0 as isize as i64, "path": file_path, "action": action, "epoch": epoch}), false)
 }
 
 #[cfg(test)]

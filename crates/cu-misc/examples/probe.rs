@@ -19,6 +19,10 @@ fn main() {
     show("detect_block", cu_misc::handle_call("computer_detect_block", &json!({})));
     show("pass_barrier", cu_misc::handle_call("computer_pass_barrier", &json!({"strategy": "ask_user", "max_attempts": 1, "timeout_ms": 2000})));
     show("dismiss_overlay", cu_misc::handle_call("computer_dismiss_overlay", &json!({"max_attempts": 1})));
+    show("shell", cu_misc::handle_call("computer_shell", &json!({"command": "echo hello"})));
+    show("shell_exec", cu_misc::handle_call("shell_exec", &json!({"command": "echo hello123"})));
+    show("shell_bg", cu_misc::handle_call("shell_background", &json!({"command": "echo bg"})));
+    show("wait_download", cu_misc::handle_call("computer_wait_download", &json!({"timeout_seconds": 1})));
 
     // audio mute toggle restore: read current, mute then unmute
     if let ToolOut::Json(v, _) = cu_misc::handle_call("computer_audio_action", &json!({"action": "status"})) {

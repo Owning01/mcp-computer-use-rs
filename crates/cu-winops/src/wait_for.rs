@@ -162,7 +162,7 @@ fn find_top_window(terms: &[String]) -> Option<serde_json::Value> {
     None
 }
 
-fn uia_exists(hwnd_opt: Option<i64>, name: &str, automation_id: &str) -> bool {
+pub fn uia_exists(hwnd_opt: Option<i64>, name: &str, automation_id: &str) -> bool {
     if name.is_empty() && automation_id.is_empty() {
         return false;
     }

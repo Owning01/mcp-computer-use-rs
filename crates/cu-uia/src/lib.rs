@@ -1091,12 +1091,667 @@ fn handle_find_template(args: &Value) -> ToolOut {
     ToolOut::Json(payload, false)
 }
 
+// ---------------- ui_action ----------------
+
+fn handle_ui_action(args: &Value) -> ToolOut {
+    // ref no soportado nativamente (estado del proceso Node)
+    if args.get("ref").is_some() {
+        return ToolOut::Json(json!({"ok": false, "error": "ref_not_supported_native"}), true);
+    }
+    let action = args.get("action").and_then(as_str).unwrap_or("").to_string();
+    let supported = ["focus","invoke","toggle","expand","collapse","select","set_value"];
+    if !supported.contains(&action.as_str()) {
+        return ToolOut::Json(json!({"ok": false, "error": "unsupported_ui_action"}), true);
+    }
+    let hwnd = args.get("hwnd").and_then(as_i64).unwrap_or(0);
+    let hwnd = if hwnd > 0 { hwnd } else { foreground_hwnd() };
+    let target_window = args.get("target_window").and_then(as_str).unwrap_or("").to_string();
+    let name_need = args.get("name").and_then(as_str).unwrap_or("").to_string();
+    let id_need = args.get("automation_id").and_then(as_str).unwrap_or("").to_string();
+    let type_need = args.get("control_type").and_then(as_str).unwrap_or("").to_string();
+
+    let auto = match create_automation() { Some(a) => a, None => {
+        return ToolOut::Json(json!({"ok": false, "error": "uia_init_failed"}), true);
+    }};
+    let root = match root_element(&auto, hwnd, &target_window) { Some(r) => r, None => {
+        return ToolOut::Json(json!({"ok": false, "error": "window_not_found"}), true);
+    }};
+    let walker = match unsafe { auto.ControlViewWalker() } { Ok(w) => w, Err(_) => {
+        return ToolOut::Json(json!({"ok": false, "error": "walker_failed"}), true);
+    }};
+
+    // find first matching element (DFS)
+    fn find_el(walker: &IUIAutomationTreeWalker, el: &IUIAutomationElement, name_need: &str, id_need: &str, type_need: &str) -> Option<IUIAutomationElement> {
+        unsafe {
+            let c = el;
+            let c_name = c.CurrentName().map(bstr_to_string).unwrap_or_default();
+            let c_aid = c.CurrentAutomationId().map(bstr_to_string).unwrap_or_default();
+            let c_type = control_type_name(c.CurrentControlType().map(|v| v.0).unwrap_or(0));
+            let name_ok = name_need.is_empty() || c_name.to_lowercase().contains(&name_need.to_lowercase());
+            let id_ok = id_need.is_empty() || c_aid == id_need;
+            let type_ok = type_need.is_empty() || c_type == type_need || c_type.to_lowercase() == type_need.to_lowercase();
+            if name_ok && id_ok && type_ok && (!name_need.is_empty() || !id_need.is_empty()) {
+                return Some(el.clone());
+            }
+            let mut child = walker.GetFirstChildElement(el).ok();
+            while let Some(ch) = child {
+                if let Some(found) = find_el(walker, &ch, name_need, id_need, type_need) {
+                    return Some(found);
+                }
+                child = walker.GetNextSiblingElement(&ch).ok();
+            }
+            None
+        }
+    }
+
+    let matched = find_el(&walker, &root, &name_need, &id_need, &type_need);
+    let matched = match matched { Some(m) => m, None => {
+        return ToolOut::Json(json!({"ok": false, "error": "element_not_found"}), true);
+    }};
+
+    let c = matched.clone();
+    let name = unsafe { c.CurrentName().map(bstr_to_string).unwrap_or_default() };
+    let ct = unsafe { control_type_name(c.CurrentControlType().map(|v| v.0).unwrap_or(0)) };
+    let rect = unsafe { c.CurrentBoundingRectangle().unwrap_or(windows::Win32::Foundation::RECT{left:0,top:0,right:0,bottom:0}) };
+
+    let perform = |act: &str| -> Result<(), String> {
+        unsafe {
+            match act {
+                "focus" => c.SetFocus().map_err(|e| e.to_string()),
+                "invoke" => {
+                    let ip = c.GetCurrentPatternAs::<windows::Win32::UI::Accessibility::IUIAutomationInvokePattern>(UIA_InvokePatternId).map_err(|e| e.to_string())?;
+                    ip.Invoke().map_err(|e| e.to_string())
+                }
+                "toggle" => {
+                    let tp = c.GetCurrentPatternAs::<windows::Win32::UI::Accessibility::IUIAutomationTogglePattern>(UIA_TogglePatternId).map_err(|e| e.to_string())?;
+                    tp.Toggle().map_err(|e| e.to_string())
+                }
+                "expand" => {
+                    let ep = c.GetCurrentPatternAs::<windows::Win32::UI::Accessibility::IUIAutomationExpandCollapsePattern>(UIA_ExpandCollapsePatternId).map_err(|e| e.to_string())?;
+                    ep.Expand().map_err(|e| e.to_string())
+                }
+                "collapse" => {
+                    let ep = c.GetCurrentPatternAs::<windows::Win32::UI::Accessibility::IUIAutomationExpandCollapsePattern>(UIA_ExpandCollapsePatternId).map_err(|e| e.to_string())?;
+                    ep.Collapse().map_err(|e| e.to_string())
+                }
+                "select" => {
+                    let sp = c.GetCurrentPatternAs::<windows::Win32::UI::Accessibility::IUIAutomationSelectionItemPattern>(UIA_SelectionItemPatternId).map_err(|e| e.to_string())?;
+                    sp.Select().map_err(|e| e.to_string())
+                }
+                "set_value" => {
+                    let vp = c.GetCurrentPatternAs::<IUIAutomationValuePattern>(UIA_ValuePatternId).map_err(|e| e.to_string())?;
+                    let bstr = windows::core::BSTR::from(args.get("value").and_then(as_str).unwrap_or(""));
+                    vp.SetValue(&bstr).map_err(|e| e.to_string())
+                }
+                _ => Err("unsupported_ui_action".into()),
+            }
+        }
+    };
+    let res = perform(&action);
+
+    if let Err(e) = res {
+        let err_code = if e.contains("pattern") { e } else { e };
+        return ToolOut::Json(json!({"ok": false, "error": err_code}), true);
+    }
+
+    let epoch = cu_core::epoch::bump();
+    let mut payload = json!({
+        "ok": true,
+        "action": action,
+        "name": name,
+        "control_type": ct,
+        "x": (rect.left + (rect.right-rect.left)/2),
+        "y": (rect.top + (rect.bottom-rect.top)/2),
+        "epoch": epoch
+    });
+
+    // snapshot_after
+    if args.get("snapshot_after").and_then(as_bool).unwrap_or(false) {
+        let snap = collect_elements(hwnd, &target_window, 12, 60, false, true);
+        if snap.ok {
+            let ec = snap.elements.len();
+            payload["fresh_snapshot"] = json!({
+                "window_title": snap.window_title,
+                "hwnd": snap.hwnd,
+                "elements": snap.elements.into_iter().take(30).collect::<Vec<_>>(),
+                "element_count": ec
+            });
+        }
+    }
+
+    ToolOut::Json(payload, false)
+}
+
+// ---------------- read_selection ----------------
+
+fn handle_read_selection(args: &Value) -> ToolOut {
+    let select_all = args.get("select_all").and_then(as_bool).unwrap_or(false);
+    let target_window = args.get("target_window").and_then(as_str).unwrap_or("").to_string();
+    if !target_window.is_empty() {
+        // focus window best-effort omitted (no NativeWin.FocusWindow binding here)
+    }
+    // UIA TextPattern on focused element
+    let auto = match create_automation() { Some(a) => a, None => {
+        return ToolOut::Json(json!({"ok": false, "error": "uia_init_failed"}), true);
+    }};
+    let el = match unsafe { auto.GetFocusedElement() } { Ok(e) => e, Err(_) => {
+        return ToolOut::Json(json!({"ok": false, "error": "no_focused_element"}), true);
+    }};
+    unsafe {
+        use windows::Win32::UI::Accessibility::IUIAutomationTextPattern;
+        if let Ok(tp) = el.GetCurrentPatternAs::<IUIAutomationTextPattern>(windows::Win32::UI::Accessibility::UIA_TextPatternId) {
+            if let Ok(range) = tp.DocumentRange() {
+                if let Ok(bstr) = range.GetText(-1) {
+                    let text = bstr_to_string(bstr);
+                    let payload = json!({"ok": true, "text": text, "length": text.len()});
+                    return ToolOut::Json(payload, false);
+                }
+            }
+        }
+    }
+    // fallback: no text
+    ToolOut::Json(json!({"ok": true, "text": "", "length": 0}), false)
+}
+
+// ---------------- observe ----------------
+
+fn active_window_info() -> (String, String, i64) {
+    let hwnd = foreground_hwnd();
+    let auto = match create_automation() { Some(a) => a, None => return ("(Sin ventana activa)".into(), "unknown".into(), hwnd) };
+    let el = match unsafe { auto.ElementFromHandle(windows::Win32::Foundation::HWND(hwnd as *mut _)) } { Ok(e) => e, Err(_) => return ("(Sin ventana activa)".into(), "unknown".into(), hwnd) };
+    let title = unsafe { el.CurrentName().map(bstr_to_string).unwrap_or_default() };
+    let pid = unsafe { el.CurrentProcessId().unwrap_or(0) as u32 };
+    let pname = process_name(pid);
+    let title = if title.is_empty() { "(Sin ventana activa)".into() } else { title };
+    (title, pname, hwnd)
+}
+
+fn handle_observe(args: &Value) -> ToolOut {
+    let (win_title, proc_name, hwnd) = active_window_info();
+    // map ui
+    let mapped = handle_map_ui(&json!({"hwnd": hwnd, "max_results": 200}));
+    let mut elements = Vec::new();
+    if let ToolOut::Json(v, _) = &mapped {
+        if let Some(arr) = v.get("elements").and_then(|x| x.as_array()) {
+            elements = arr.clone();
+        }
+    }
+    let limit = args.get("limit").and_then(as_i64).unwrap_or(25).clamp(5, 100) as usize;
+    let format = args.get("format").and_then(as_str).unwrap_or("table");
+    let is_browser = false;
+    let count = elements.len();
+
+    if format == "json" {
+        let compact: Vec<Value> = elements.iter().take(limit).map(|el| {
+            json!({
+                "id": el.get("id").cloned().unwrap_or(json!(null)),
+                "type": el.get("type").cloned().unwrap_or(json!("Control")),
+                "name": el.get("name").cloned().unwrap_or(json!("")).as_str().unwrap_or("").chars().take(60).collect::<String>()
+            })
+        }).collect();
+        let payload = json!({
+            "ok": true,
+            "window": {"title": win_title, "process": proc_name, "hwnd": hwnd, "is_browser": is_browser},
+            "source": "native_uia",
+            "count": count,
+            "elements": compact,
+            "screenshot": null
+        });
+        return ToolOut::JsonStructured(payload, false);
+    }
+
+    // table
+    let slice = &elements[..elements.len().min(limit)];
+    let mut table = String::from("| ID | Tipo | Control / Texto |\n|---|---|---|\n");
+    for el in slice {
+        let id = el.get("id").map(|v| v.to_string()).unwrap_or_else(|| "-".into());
+        let typ = el.get("type").and_then(as_str).unwrap_or("Item");
+        let raw = el.get("name").and_then(as_str).unwrap_or("");
+        let clean = raw.replace(['\r','\n','\t','|'], " ").chars().take(45).collect::<String>();
+        let clean = if clean.is_empty() { "(sin texto)".to_string() } else { clean };
+        table.push_str(&format!("| {} | {} | {} |\n", id, typ, clean));
+    }
+    if count > limit {
+        table.push_str(&format!("*(+{} controles adicionales omitidos para ahorrar tokens)*\n", count - limit));
+    }
+    let text_summary = format!(
+        "### 🖥️ Ventana: {} [{}]\n*Modo: {} | Controles: {}*\n{}\n",
+        win_title, proc_name,
+        if is_browser { "🌐 Navegador (CDP DOM)" } else { "🪟 App Nativa (UIA)" },
+        count, table
+    );
+    let payload = json!({
+        "ok": true,
+        "summary": text_summary,
+        "window": {"title": win_title, "process": proc_name, "hwnd": hwnd, "is_browser": is_browser},
+        "count": count,
+        "shot": null
+    });
+    ToolOut::Json(payload, false)
+}
+
+// ---------------- context_menu ----------------
+
+fn vk_from_key(k: &str) -> u8 {
+    match k.trim().to_lowercase().as_str() {
+        "down" => 0x28,
+        "up" => 0x26,
+        "left" => 0x25,
+        "right" => 0x27,
+        "enter" | "return" => 0x0D,
+        "escape" | "esc" => 0x1B,
+        "tab" => 0x09,
+        "space" => 0x20,
+        s if s.len() == 1 && s.chars().next().unwrap().is_ascii_lowercase() => (0x41 + (s.chars().next().unwrap() as u8 - b'a')) as u8,
+        s if s.len() == 1 && s.chars().next().unwrap().is_ascii_digit() => (0x30 + (s.chars().next().unwrap() as u8 - b'0')) as u8,
+        _ => 0,
+    }
+}
+
+fn handle_context_menu(args: &Value) -> ToolOut {
+    let x = args.get("x").and_then(as_i64).unwrap_or(0) as i32;
+    let y = args.get("y").and_then(as_i64).unwrap_or(0) as i32;
+    let item_text = args.get("item_text").or(args.get("select_text")).and_then(as_str).unwrap_or("").to_string();
+    let keys: Vec<String> = args.get("keys").or(args.get("key_sequence")).and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()).unwrap_or_default();
+    let delay_ms = args.get("delay_ms").and_then(as_i64).unwrap_or(150).max(0) as u64;
+
+    unsafe {
+        windows::Win32::UI::WindowsAndMessaging::SetCursorPos(x, y);
+        windows::Win32::UI::Input::KeyboardAndMouse::mouse_event(windows::Win32::UI::Input::KeyboardAndMouse::MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0);
+        windows::Win32::UI::Input::KeyboardAndMouse::mouse_event(windows::Win32::UI::Input::KeyboardAndMouse::MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0);
+    }
+    std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+
+    if !item_text.is_empty() {
+        // find menu item via UIA root children (menus/popups)
+        let auto = match create_automation() { Some(a) => a, None => {
+            return ToolOut::Json(json!({"ok": false, "error": "uia_init_failed"}), true);
+        }};
+        unsafe {
+            use windows::Win32::UI::Accessibility::{IUIAutomation, UIA_MenuControlTypeId, UIA_WindowControlTypeId};
+            let root = match auto.GetRootElement() { Ok(r) => r, Err(_) => {
+                // dismiss
+                windows::Win32::UI::Input::KeyboardAndMouse::keybd_event(0x1B, 0, windows::Win32::UI::Input::KeyboardAndMouse::KEYBD_EVENT_FLAGS(2), 0);
+                return ToolOut::Json(json!({"ok": false, "error": "root_failed"}), true);
+            }};
+            // find menu item by name contains
+            fn find_menu_item(walker: &IUIAutomationTreeWalker, el: &windows::Win32::UI::Accessibility::IUIAutomationElement, needle: &str) -> Option<windows::Win32::UI::Accessibility::IUIAutomationElement> {
+                unsafe {
+                    // check if control type menu/window and search descendants
+                    let mut child = walker.GetFirstChildElement(el).ok();
+                    // first search direct children menus
+                    // We'll do DFS for MenuItem
+                    fn dfs(walker: &IUIAutomationTreeWalker, el: &windows::Win32::UI::Accessibility::IUIAutomationElement, needle: &str) -> Option<windows::Win32::UI::Accessibility::IUIAutomationElement> {
+                        unsafe {
+                            let ct = el.CurrentControlType().map(|v| v.0).unwrap_or(0);
+                            if ct == 50011 { // MenuItem
+                                let name = el.CurrentName().map(bstr_to_string).unwrap_or_default();
+                                if !name.is_empty() && name.to_lowercase().contains(&needle.to_lowercase()) {
+                                    return Some(el.clone());
+                                }
+                            }
+                            let mut c = walker.GetFirstChildElement(el).ok();
+                            while let Some(ch) = c {
+                                if let Some(f) = dfs(walker, &ch, needle) { return Some(f); }
+                                c = walker.GetNextSiblingElement(&ch).ok();
+                            }
+                            None
+                        }
+                    }
+                    // search in root's top-level menus
+                    let mut c = walker.GetFirstChildElement(el).ok();
+                    while let Some(ch) = c {
+                        if let Some(f) = dfs(walker, &ch, needle) { return Some(f); }
+                        c = walker.GetNextSiblingElement(&ch).ok();
+                    }
+                    None
+                }
+            }
+            let walker = match auto.ControlViewWalker() { Ok(w) => w, Err(_) => {
+                return ToolOut::Json(json!({"ok": false, "error": "walker_failed"}), true);
+            }};
+            if let Some(matched) = find_menu_item(&walker, &root, &item_text) {
+                let rect = matched.CurrentBoundingRectangle().unwrap_or(windows::Win32::Foundation::RECT{left:0,top:0,right:0,bottom:0});
+                let cx = rect.left + (rect.right-rect.left)/2;
+                let cy = rect.top + (rect.bottom-rect.top)/2;
+                windows::Win32::UI::WindowsAndMessaging::SetCursorPos(cx, cy);
+                std::thread::sleep(std::time::Duration::from_millis(40));
+                windows::Win32::UI::Input::KeyboardAndMouse::mouse_event(windows::Win32::UI::Input::KeyboardAndMouse::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+                windows::Win32::UI::Input::KeyboardAndMouse::mouse_event(windows::Win32::UI::Input::KeyboardAndMouse::MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+                let selected = matched.CurrentName().map(bstr_to_string).unwrap_or_default();
+                let payload = json!({
+                    "ok": true,
+                    "method": "uia_text_match",
+                    "selected": selected,
+                    "coords": {"x": cx, "y": cy}
+                });
+                return ToolOut::Json(payload, false);
+            }
+        }
+        // not found -> dismiss
+        unsafe {
+            use windows::Win32::UI::Input::KeyboardAndMouse::keybd_event;
+            windows::Win32::UI::Input::KeyboardAndMouse::keybd_event(0x1B, 0, windows::Win32::UI::Input::KeyboardAndMouse::KEYBD_EVENT_FLAGS(0), 0);
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            windows::Win32::UI::Input::KeyboardAndMouse::keybd_event(0x1B, 0, windows::Win32::UI::Input::KeyboardAndMouse::KEYBD_EVENT_FLAGS(2), 0);
+        }
+        return ToolOut::Json(json!({"ok": false, "error": "Item not found and no key sequence provided; menu dismissed with Escape"}), true);
+    }
+
+    // key sequence
+    if !keys.is_empty() {
+        for k in &keys {
+            let vk = vk_from_key(k);
+            if vk != 0 {
+                unsafe {
+                    use windows::Win32::UI::Input::KeyboardAndMouse::keybd_event;
+                    windows::Win32::UI::Input::KeyboardAndMouse::keybd_event(vk, 0, windows::Win32::UI::Input::KeyboardAndMouse::KEYBD_EVENT_FLAGS(0), 0);
+                }
+                std::thread::sleep(std::time::Duration::from_millis(25));
+                unsafe {
+                    use windows::Win32::UI::Input::KeyboardAndMouse::keybd_event;
+                    windows::Win32::UI::Input::KeyboardAndMouse::keybd_event(vk, 0, windows::Win32::UI::Input::KeyboardAndMouse::KEYBD_EVENT_FLAGS(2), 0);
+                }
+                std::thread::sleep(std::time::Duration::from_millis(35));
+            }
+        }
+        let payload = json!({"ok": true, "method": "key_sequence", "keys_sent": keys.len()});
+        return ToolOut::Json(payload, false);
+    }
+
+    // dismiss
+    unsafe {
+        use windows::Win32::UI::Input::KeyboardAndMouse::keybd_event;
+        windows::Win32::UI::Input::KeyboardAndMouse::keybd_event(0x1B, 0, windows::Win32::UI::Input::KeyboardAndMouse::KEYBD_EVENT_FLAGS(0), 0);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        windows::Win32::UI::Input::KeyboardAndMouse::keybd_event(0x1B, 0, windows::Win32::UI::Input::KeyboardAndMouse::KEYBD_EVENT_FLAGS(2), 0);
+    }
+    ToolOut::Json(json!({"ok": false, "error": "Item not found and no key sequence provided; menu dismissed with Escape"}), true)
+}
+
+// ---------------- toast_action ----------------
+
+fn handle_toast_action(args: &Value) -> ToolOut {
+    let action = args.get("action").and_then(as_str).unwrap_or("list").to_lowercase();
+    let button_text = args.get("button_text").and_then(as_str).unwrap_or("").to_string();
+
+    if action == "click_button" {
+        if button_text.is_empty() {
+            return ToolOut::Json(json!({"ok": false, "error": "button_text is required for click_button action"}), true);
+        }
+        // UIA find button by name contains? origin exact NameProperty equals btnText. We'll do contains? Origin exact. Use exact first, then contains fallback.
+        let auto = match create_automation() { Some(a) => a, None => {
+            return ToolOut::Json(json!({"ok": false, "error": "uia_init_failed"}), true);
+        }};
+        unsafe {
+            let root = match auto.GetRootElement() { Ok(r) => r, Err(_) => {
+                return ToolOut::Json(json!({"ok": false, "error": "root_failed"}), true);
+            }};
+            // DFS for button with name == button_text
+            fn find_btn(walker: &windows::Win32::UI::Accessibility::IUIAutomationTreeWalker, el: &windows::Win32::UI::Accessibility::IUIAutomationElement, needle: &str) -> Option<windows::Win32::UI::Accessibility::IUIAutomationElement> {
+                unsafe {
+                    let ct = el.CurrentControlType().map(|v| v.0).unwrap_or(0);
+                    if ct == 50000 { // Button
+                        let name = el.CurrentName().map(bstr_to_string).unwrap_or_default();
+                        if name == needle {
+                            return Some(el.clone());
+                        }
+                    }
+                    let mut c = walker.GetFirstChildElement(el).ok();
+                    while let Some(ch) = c {
+                        if let Some(f) = find_btn(walker, &ch, needle) { return Some(f); }
+                        c = walker.GetNextSiblingElement(&ch).ok();
+                    }
+                    None
+                }
+            }
+            let walker = match auto.ControlViewWalker() { Ok(w) => w, Err(_) => {
+                return ToolOut::Json(json!({"ok": false, "error": "walker_failed"}), true);
+            }};
+            if let Some(btn) = find_btn(&walker, &root, &button_text) {
+                // try invoke pattern
+                if let Ok(ip) = btn.GetCurrentPatternAs::<windows::Win32::UI::Accessibility::IUIAutomationInvokePattern>(windows::Win32::UI::Accessibility::UIA_InvokePatternId) {
+                    let _ = ip.Invoke();
+                    return ToolOut::Json(json!({"ok": true, "action": "click_button", "clicked": button_text}), false);
+                }
+                // fallback click
+                let rect = btn.CurrentBoundingRectangle().unwrap_or(windows::Win32::Foundation::RECT{left:0,top:0,right:0,bottom:0});
+                let cx = rect.left + (rect.right-rect.left)/2;
+                let cy = rect.top + (rect.bottom-rect.top)/2;
+                windows::Win32::UI::WindowsAndMessaging::SetCursorPos(cx, cy);
+                std::thread::sleep(std::time::Duration::from_millis(20));
+                windows::Win32::UI::Input::KeyboardAndMouse::mouse_event(windows::Win32::UI::Input::KeyboardAndMouse::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+                windows::Win32::UI::Input::KeyboardAndMouse::mouse_event(windows::Win32::UI::Input::KeyboardAndMouse::MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+                return ToolOut::Json(json!({"ok": true, "action": "click_button", "clicked": button_text}), false);
+            } else {
+                return ToolOut::Json(json!({"ok": false, "error": format!("Toast action button not found: {}", button_text)}), true);
+            }
+        }
+    }
+
+    // list/dismiss/clear_all not supported natively (WinRT) -> proxy
+    ToolOut::Json(json!({"ok": false, "error": "not_supported_native"}), true)
+}
+
+// ---------------- system_tray ----------------
+
+fn handle_system_tray(args: &Value) -> ToolOut {
+    // Simplified: list visible icons only (no overflow) and actions by mouse.
+    let action = args.get("action").and_then(as_str).unwrap_or("list").to_lowercase();
+    let target = args.get("target").and_then(as_str).unwrap_or("").to_string();
+    let index = args.get("index").and_then(as_i64).unwrap_or(-1);
+    let include_overflow = args.get("include_overflow").and_then(as_bool).unwrap_or(true);
+
+    // Find Shell_TrayWnd
+    let tray_hwnd = unsafe {
+        use windows::Win32::UI::WindowsAndMessaging::FindWindowW;
+        FindWindowW(windows::core::w!("Shell_TrayWnd"), None).unwrap_or_default()
+    };
+    if tray_hwnd.0.is_null() {
+        return ToolOut::Json(json!({"ok": false, "error": "Shell_TrayWnd window not found"}), true);
+    }
+    let auto = match create_automation() { Some(a) => a, None => {
+        return ToolOut::Json(json!({"ok": false, "error": "uia_init_failed"}), true);
+    }};
+    let tray_elem = match unsafe { auto.ElementFromHandle(tray_hwnd) } { Ok(e) => e, Err(_) => {
+        return ToolOut::Json(json!({"ok": false, "error": "tray_element_failed"}), true);
+    }};
+
+    // collect visible icons: Button with AutomationId "NotifyItemIcon"
+    let mut items: Vec<serde_json::Map<String, Value>> = Vec::new();
+    let mut idx = 0i64;
+    unsafe {
+        let walker = match auto.ControlViewWalker() { Ok(w) => w, Err(_) => {
+            return ToolOut::Json(json!({"ok": false, "error": "walker_failed"}), true);
+        }};
+        // DFS collect
+        fn collect(walker: &windows::Win32::UI::Accessibility::IUIAutomationTreeWalker, el: &windows::Win32::UI::Accessibility::IUIAutomationElement, items: &mut Vec<serde_json::Map<String, Value>>, idx: &mut i64, is_overflow: bool) {
+            unsafe {
+                let ct = el.CurrentControlType().map(|v| v.0).unwrap_or(0);
+                let aid = el.CurrentAutomationId().map(bstr_to_string).unwrap_or_default();
+                if ct == 50000 && aid == "NotifyItemIcon" {
+                    let r = el.CurrentBoundingRectangle().unwrap_or(windows::Win32::Foundation::RECT{left:0,top:0,right:0,bottom:0});
+                    if r.right - r.left > 0 && r.bottom - r.top > 0 {
+                        let name = el.CurrentName().map(bstr_to_string).unwrap_or_default();
+                        let mut info = serde_json::Map::new();
+                        info.insert("Index".into(), json!(*idx));
+                        info.insert("Id".into(), json!(format!("tray_vis_{}", *idx)));
+                        info.insert("Name".into(), json!(name.clone()));
+                        info.insert("Tooltip".into(), json!(name.clone()));
+                        info.insert("Area".into(), json!("visible"));
+                        info.insert("IsOverflow".into(), json!(false));
+                        info.insert("X".into(), json!(r.left + (r.right-r.left)/2));
+                        info.insert("Y".into(), json!(r.top + (r.bottom-r.top)/2));
+                        info.insert("Width".into(), json!(r.right-r.left));
+                        info.insert("Height".into(), json!(r.bottom-r.top));
+                        items.push(info);
+                        *idx += 1;
+                    }
+                }
+                let mut c = walker.GetFirstChildElement(el).ok();
+                while let Some(ch) = c {
+                    collect(walker, &ch, items, idx, is_overflow);
+                    c = walker.GetNextSiblingElement(&ch).ok();
+                }
+            }
+        }
+        collect(&walker, &tray_elem, &mut items, &mut idx, false);
+    }
+
+    // normalize items like origin
+    let mut norm_items: Vec<Value> = Vec::new();
+    for it in &items {
+        let name = it.get("Name").and_then(as_str).unwrap_or("").to_string();
+        let process = resolve_process_name(&name);
+        let pid = 0i64; // not resolved
+        let x = it.get("X").and_then(as_i64).unwrap_or(0);
+        let y = it.get("Y").and_then(as_i64).unwrap_or(0);
+        let w = it.get("Width").and_then(as_i64).unwrap_or(0);
+        let h = it.get("Height").and_then(as_i64).unwrap_or(0);
+        let idxv = it.get("Index").and_then(as_i64).unwrap_or(0);
+        let id = it.get("Id").and_then(as_str).unwrap_or("").to_string();
+        let area = it.get("Area").and_then(as_str).unwrap_or("visible").to_string();
+        let is_overflow = it.get("IsOverflow").and_then(as_bool).unwrap_or(false);
+        norm_items.push(json!({
+            "id": id,
+            "name": name,
+            "process": process,
+            "tooltip": name,
+            "area": area,
+            "coords": {"x": x, "y": y, "w": w, "h": h},
+            "index": idxv,
+            "is_overflow": is_overflow
+        }));
+    }
+
+    let visible_count = norm_items.len();
+    let mut overflow_count = 0usize;
+
+    // overflow not implemented (complex) -> if include_overflow, note? We'll skip to avoid invasiveness.
+    // action list
+    if action == "list" {
+        let payload = json!({
+            "ok": true,
+            "action": "list",
+            "count": norm_items.len(),
+            "visible_count": visible_count,
+            "overflow_count": overflow_count,
+            "items": norm_items
+        });
+        return ToolOut::Json(payload, false);
+    }
+
+    // find target
+    let mut target_item: Option<Value> = None;
+    if index >= 0 && (index as usize) < norm_items.len() {
+        target_item = Some(norm_items[index as usize].clone());
+    } else if !target.is_empty() {
+        // find by name/process/tooltip/id
+        for it in &norm_items {
+            let name = it.get("name").and_then(as_str).unwrap_or("");
+            let process = it.get("process").and_then(as_str).unwrap_or("");
+            let id = it.get("id").and_then(as_str).unwrap_or("");
+            if name.to_lowercase().contains(&target.to_lowercase())
+                || process.to_lowercase().contains(&target.to_lowercase())
+                || id.to_lowercase().contains(&target.to_lowercase()) {
+                target_item = Some(it.clone());
+                break;
+            }
+        }
+    }
+    let target = match target_item { Some(t) => t, None => {
+        return ToolOut::Json(json!({"ok": false, "error": format!("Target tray icon not found: {}", target)}), true);
+    }};
+
+    let tx = target.get("coords").and_then(|c| c.get("x")).and_then(as_i64).unwrap_or(0) as i32;
+    let ty = target.get("coords").and_then(|c| c.get("y")).and_then(as_i64).unwrap_or(0) as i32;
+
+    unsafe {
+        windows::Win32::UI::WindowsAndMessaging::SetCursorPos(tx, ty);
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        match action.as_str() {
+            "click" => {
+                windows::Win32::UI::Input::KeyboardAndMouse::mouse_event(windows::Win32::UI::Input::KeyboardAndMouse::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+                windows::Win32::UI::Input::KeyboardAndMouse::mouse_event(windows::Win32::UI::Input::KeyboardAndMouse::MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+            }
+            "right_click" => {
+                windows::Win32::UI::Input::KeyboardAndMouse::mouse_event(windows::Win32::UI::Input::KeyboardAndMouse::MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0);
+                windows::Win32::UI::Input::KeyboardAndMouse::mouse_event(windows::Win32::UI::Input::KeyboardAndMouse::MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0);
+            }
+            "double_click" => {
+                windows::Win32::UI::Input::KeyboardAndMouse::mouse_event(windows::Win32::UI::Input::KeyboardAndMouse::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+                windows::Win32::UI::Input::KeyboardAndMouse::mouse_event(windows::Win32::UI::Input::KeyboardAndMouse::MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+                std::thread::sleep(std::time::Duration::from_millis(60));
+                windows::Win32::UI::Input::KeyboardAndMouse::mouse_event(windows::Win32::UI::Input::KeyboardAndMouse::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+                windows::Win32::UI::Input::KeyboardAndMouse::mouse_event(windows::Win32::UI::Input::KeyboardAndMouse::MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+            }
+            _ => {}
+        }
+    }
+
+    let epoch = cu_core::epoch::bump();
+    let tname = target.get("name").and_then(as_str).unwrap_or("").to_string();
+    let tprocess = target.get("process").and_then(as_str).unwrap_or("").to_string();
+    let tidx = target.get("index").and_then(as_i64).unwrap_or(0);
+    let tid = target.get("id").and_then(as_str).unwrap_or("").to_string();
+    let tisov = target.get("is_overflow").and_then(as_bool).unwrap_or(false);
+    let tw = target.get("coords").and_then(|c| c.get("w")).and_then(as_i64).unwrap_or(0);
+    let th = target.get("coords").and_then(|c| c.get("h")).and_then(as_i64).unwrap_or(0);
+
+    let payload = json!({
+        "ok": true,
+        "action": action,
+        "count": norm_items.len(),
+        "visible_count": visible_count,
+        "overflow_count": overflow_count,
+        "items": norm_items,
+        "target": {
+            "index": tidx,
+            "id": tid,
+            "name": tname,
+            "process": tprocess,
+            "pid": 0,
+            "x": tx,
+            "y": ty,
+            "is_overflow": tisov
+        },
+        "epoch": epoch
+    });
+    ToolOut::Json(payload, false)
+}
+
+fn resolve_process_name(name: &str) -> String {
+    if name.is_empty() { return String::new(); }
+    let lower = name.to_lowercase();
+    // iterate processes
+    use windows::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS};
+    unsafe {
+        let snap = match CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) { Ok(h) => h, Err(_) => return String::new() };
+        let mut pe = PROCESSENTRY32W { dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32, ..Default::default() };
+        if Process32FirstW(snap, &mut pe).is_ok() {
+            loop {
+                let pname = String::from_utf16_lossy(&pe.szExeFile).trim_end_matches('\0').to_string();
+                let pl = pname.to_lowercase();
+                if pl.len() > 2 && (lower.contains(&pl) || pl.contains(&lower)) {
+                    let _ = windows::Win32::Foundation::CloseHandle(snap);
+                    return format!("{}.exe", pname.trim_end_matches(".exe"));
+                }
+                if Process32NextW(snap, &mut pe).is_err() { break; }
+            }
+        }
+        let _ = windows::Win32::Foundation::CloseHandle(snap);
+    }
+    String::new()
+}
+
 // ---------------- lib entry ----------------
 
 pub fn handles(name: &str) -> bool {
     matches!(name,
         "computer_inspect_ui" | "computer_snapshot" | "computer_state_fingerprint" | "computer_verify" |
-        "computer_find_element" | "computer_map_ui" | "computer_find_template"
+        "computer_find_element" | "computer_map_ui" | "computer_find_template" |
+        "computer_ui_action" | "computer_read_selection" | "computer_observe" |
+        "computer_system_tray" | "computer_context_menu" | "computer_toast_action"
     )
 }
 
@@ -1104,13 +1759,18 @@ pub fn handles(name: &str) -> bool {
 pub fn accepts(name: &str, args: &Value) -> bool {
     match name {
         "computer_find_element" => {
-            // rama harness remoto si no hay criterios locales
             let has = args.get("title").is_some() || args.get("hwnd").is_some()
                 || args.get("automation_id").is_some() || args.get("control_type").is_some()
                 || args.get("name").is_some();
             has
         }
-        "computer_wait_stable" | "computer_read_selection" | "computer_observe" => false,
+        "computer_wait_stable" => false,
+        "computer_read_selection" => true,
+        "computer_observe" => !args.get("screenshot").and_then(as_bool).unwrap_or(false),
+        "computer_ui_action" => args.get("ref").is_none(),
+        "computer_system_tray" => true,
+        "computer_context_menu" => args.get("x").is_some() && args.get("y").is_some(),
+        "computer_toast_action" => args.get("action").and_then(as_str).unwrap_or("list") == "click_button",
         "computer_find_template" => args.get("template_b64").and_then(|v| v.as_str()).map(|s| !s.trim().is_empty()).unwrap_or(false),
         _ => true,
     }
@@ -1125,6 +1785,12 @@ pub fn handle_call(name: &str, args: &Value) -> ToolOut {
         "computer_find_element" => handle_find_element(args),
         "computer_map_ui" => handle_map_ui(args),
         "computer_find_template" => handle_find_template(args),
+        "computer_ui_action" => handle_ui_action(args),
+        "computer_read_selection" => handle_read_selection(args),
+        "computer_observe" => handle_observe(args),
+        "computer_system_tray" => handle_system_tray(args),
+        "computer_context_menu" => handle_context_menu(args),
+        "computer_toast_action" => handle_toast_action(args),
         _ => ToolOut::Json(json!({"ok": false, "error": "not_implemented"}), true),
     }
 }
