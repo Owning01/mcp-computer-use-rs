@@ -328,6 +328,12 @@ fn base_meta(width: u32, height: u32, ow: u32, oh: u32, sf: f64, format: &str, s
 }
 
 pub fn screenshot(a: &ShotArgs) -> ShotOut {
+    // DPI: replica el PS del origen (proceso unaware -> coords virtualizadas). Contexto
+    // explicito por llamada: los threads del pool de spawn_blocking se reusan.
+    unsafe {
+        use windows::Win32::UI::HiDpi::{DPI_AWARENESS_CONTEXT_UNAWARE, SetThreadDpiAwarenessContext};
+        let _ = SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_UNAWARE);
+    }
     let quality = a.quality.clamp(10, 95) as u8;
     let target_width = a.width.max(0);
     let is_jpeg = !a.format.eq_ignore_ascii_case("png");

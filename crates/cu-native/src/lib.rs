@@ -29,6 +29,15 @@ struct CollectCtx {
 /// visible + titulo no vacio; si no esta minimizada, descarta dims < 50;
 /// filtro case-insensitive sobre el titulo; titulo limpiado (controles fuera, tab -> espacio).
 pub fn list_windows(filter: Option<&str>) -> Vec<WindowInfo> {
+    // DPI: el origen (via su api nativa) reporta pixeles FISICOS; este thread se marca
+    // PER_MONITOR_AWARE_V2 para replicarlo. El thread de captura fija UNAWARE (como el PS
+    // del origen). Contexto explicito por llamada: los threads del pool de spawn_blocking se reusan.
+    unsafe {
+        use windows::Win32::UI::HiDpi::{
+            DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetThreadDpiAwarenessContext,
+        };
+        let _ = SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    }
     let mut ctx = CollectCtx {
         out: Vec::new(),
         filter: filter.map(|s| s.to_lowercase()).filter(|s| !s.is_empty()),
