@@ -27,7 +27,7 @@
       "tool": "computer_lock",
       "arguments": { "action": "status" },
       "compare": "drop",
-      "ignoreKeys": ["dir", "pid", "agent"],
+      "ignoreKeys": ["dir", "pid", "agent", "id", "label", "startedAt", "refreshedAt", "expireAt", "expiresAt", "ttl", "ttl_ms", "age_ms", "expires_in_ms"],
       "timeoutMs": 30000
     }
   ]

@@ -1,0 +1,290 @@
+// computer-use2-rs — binario puente F4 (repo-migrate).
+//
+// Proxy MCP-a-MCP por stdio con 3 puntos de intercepcion:
+//   1. initialize   -> respuesta local con la forma exacta del origen (SDK 1.30.0)
+//   2. tools/list   -> metadata embebida de migration/inventory/tools-full.json (perfil agent/full)
+//   3. tools/call computer_list_windows -> implementacion nativa Rust (cu-native)
+// Todo lo demas (tasks/*, resources/*, progress, notifications) se proxea crudo al server Node
+// del origen. Puente temporal (skill repo-migrate F4); se apaga por grupos hacia F8.
+// Reglas: migration/RULEBOOK.md (ver enmienda: puente crudo por paridad byte-exacta).
+use serde_json::{json, Value};
+use std::process::Stdio;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
+use tokio::process::{Child, ChildStdin, ChildStdout, Command};
+use tokio::sync::mpsc;
+
+const ORIGIN_NODE: &str = "node";
+const ORIGIN_SCRIPT: &str = "G:/Proyectos/MCP/computer-use2/src/index.js";
+const ORIGIN_CWD: &str = "G:/Proyectos/MCP/computer-use2";
+
+const AGENT_PROFILE_TOOLS: [&str; 12] = [
+    "computer_screenshot",
+    "computer_act",
+    "computer_observe",
+    "computer_hotkey",
+    "computer_window_action",
+    "computer_fill_form",
+    "computer_upload_file",
+    "computer_login",
+    "computer_pass_barrier",
+    "computer_shell",
+    "computer_wait",
+    "computer_lock",
+];
+
+enum Src {
+    Client,
+    Child,
+}
+
+fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt().with_writer(std::io::stderr).init();
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(run())
+}
+
+async fn run() -> anyhow::Result<()> {
+    let all_tools: Vec<Value> =
+        serde_json::from_str(include_str!("../../../migration/inventory/tools-full.json"))?;
+    let profile = std::env::var("COMPUTER_USE_PROFILE")
+        .unwrap_or_else(|_| "agent".into())
+        .to_lowercase();
+    let tools: Vec<Value> = if profile == "agent" || profile == "compact" {
+        all_tools
+            .into_iter()
+            .filter(|t| {
+                t["name"]
+                    .as_str()
+                    .map(|n| AGENT_PROFILE_TOOLS.contains(&n))
+                    .unwrap_or(false)
+            })
+            .collect()
+    } else {
+        all_tools
+    };
+    tracing::info!(count = tools.len(), profile = %profile, "tools cargadas");
+
+    let disable_child = std::env::var("PARITY_DISABLE_CHILD")
+        .map(|v| v == "1")
+        .unwrap_or(false);
+    let (mut child, mut child_in, child_out) = if disable_child {
+        tracing::warn!("PARITY_DISABLE_CHILD=1: modo only-native");
+        (None, None, None)
+    } else {
+        let (c, mut ci, co) = spawn_origin()?;
+        bootstrap_child(&mut ci).await?;
+        (c, ci, co)
+    };
+
+    let (tx, mut rx) = mpsc::channel::<(Src, String)>(256);
+
+    {
+        let tx = tx.clone();
+        tokio::spawn(async move {
+            let mut lines = BufReader::new(tokio::io::stdin()).lines();
+            loop {
+                match lines.next_line().await {
+                    Ok(Some(l)) => {
+                        if tx.send((Src::Client, l)).await.is_err() {
+                            break;
+                        }
+                    }
+                    _ => break,
+                }
+            }
+            let _ = tx.send((Src::Client, "\u{0}EOF".to_string())).await;
+        });
+    }
+    if let Some(out) = child_out {
+        let tx = tx.clone();
+        tokio::spawn(async move {
+            let mut lines: Lines<BufReader<ChildStdout>> = out;
+            while let Ok(Some(l)) = lines.next_line().await {
+                // Las respuestas del bootstrap interno (id negativo) no se reenvian al cliente.
+                if let Ok(v) = serde_json::from_str::<Value>(&l) {
+                    if v.get("id").and_then(Value::as_i64).is_some_and(|id| id < 0) {
+                        continue;
+                    }
+                }
+                if tx.send((Src::Child, l)).await.is_err() {
+                    break;
+                }
+            }
+        });
+    }
+
+    let mut stdout = tokio::io::stdout();
+    while let Some((src, line)) = rx.recv().await {
+        match src {
+            Src::Child => {
+                respond_raw(&mut stdout, &line).await?;
+            }
+            Src::Client => {
+                if line == "\u{0}EOF" {
+                    break;
+                }
+                if line.trim().is_empty() {
+                    continue;
+                }
+                let msg: Value = match serde_json::from_str(&line) {
+                    Ok(v) => v,
+                    Err(_) => continue,
+                };
+                let method = msg.get("method").and_then(Value::as_str).unwrap_or("");
+                let is_request = msg.get("id").is_some();
+                match method {
+                    "initialize" => {
+                        let pv = msg["params"]["protocolVersion"]
+                            .as_str()
+                            .unwrap_or("2024-11-05");
+                        let resp = json!({
+                            "jsonrpc": "2.0",
+                            "id": msg.get("id").cloned().unwrap_or(Value::Null),
+                            "result": {
+                                "protocolVersion": pv,
+                                "capabilities": {
+                                    "tools": {},
+                                    "tasks": {
+                                        "list": {},
+                                        "cancel": {},
+                                        "requests": { "tools": { "call": {} } }
+                                    }
+                                },
+                                "serverInfo": { "name": "computer-use", "version": "0.15.0" }
+                            }
+                        });
+                        respond_value(&mut stdout, &resp).await?;
+                    }
+                    "tools/list" => {
+                        let resp = json!({
+                            "jsonrpc": "2.0",
+                            "id": msg.get("id").cloned().unwrap_or(Value::Null),
+                            "result": { "tools": tools }
+                        });
+                        respond_value(&mut stdout, &resp).await?;
+                    }
+                    "tools/call" => {
+                        let name = msg["params"]["name"].as_str().unwrap_or("");
+                        if name == "computer_list_windows" {
+                            native_list_windows(&msg, &mut stdout).await?;
+                        } else if is_request && child_in.is_none() {
+                            let resp = json!({
+                                "jsonrpc": "2.0",
+                                "id": msg.get("id").cloned().unwrap_or(Value::Null),
+                                "error": { "code": -32001, "message": "bridge child disabled (PARITY_DISABLE_CHILD=1)" }
+                            });
+                            respond_value(&mut stdout, &resp).await?;
+                        } else {
+                            forward(&mut child_in, &line).await?;
+                        }
+                    }
+                    _ => {
+                        if is_request && child_in.is_none() {
+                            let resp = json!({
+                                "jsonrpc": "2.0",
+                                "id": msg.get("id").cloned().unwrap_or(Value::Null),
+                                "error": { "code": -32001, "message": "bridge child disabled (PARITY_DISABLE_CHILD=1)" }
+                            });
+                            respond_value(&mut stdout, &resp).await?;
+                        } else {
+                            forward(&mut child_in, &line).await?;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if let Some(mut c) = child.take() {
+        let _ = c.kill().await;
+    }
+    Ok(())
+}
+
+async fn bootstrap_child(child_in: &mut Option<ChildStdin>) -> anyhow::Result<()> {
+    // Inicializa el child Node con id interno negativo: sus respuestas no se reenvian al cliente.
+    let Some(ci) = child_in.as_mut() else {
+        return Ok(());
+    };
+    let init = json!({
+        "jsonrpc": "2.0",
+        "id": -1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": { "name": "cu2-bridge", "version": "0.1.0" }
+        }
+    });
+    ci.write_all(serde_json::to_string(&init)?.as_bytes()).await?;
+    ci.write_all(b"\n").await?;
+    ci.write_all(b"{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\",\"params\":{}}\n")
+        .await?;
+    ci.flush().await?;
+    Ok(())
+}
+
+fn spawn_origin() -> anyhow::Result<(Option<Child>, Option<ChildStdin>, Option<Lines<BufReader<ChildStdout>>>)> {
+    let mut cmd = Command::new(ORIGIN_NODE);
+    cmd.arg(ORIGIN_SCRIPT)
+        .current_dir(ORIGIN_CWD)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    let mut child = cmd.spawn()?;
+    let stdin = child.stdin.take();
+    let stdout = child.stdout.take().map(|s| BufReader::new(s).lines());
+    if let Some(err) = child.stderr.take() {
+        tokio::spawn(async move {
+            let mut lines = BufReader::new(err).lines();
+            while let Ok(Some(l)) = lines.next_line().await {
+                eprintln!("[origin] {l}");
+            }
+        });
+    }
+    Ok((Some(child), stdin, stdout))
+}
+
+async fn forward(child_in: &mut Option<ChildStdin>, line: &str) -> anyhow::Result<()> {
+    if let Some(ci) = child_in.as_mut() {
+        ci.write_all(line.as_bytes()).await?;
+        ci.write_all(b"\n").await?;
+        ci.flush().await?;
+    }
+    Ok(())
+}
+
+async fn respond_value(stdout: &mut tokio::io::Stdout, v: &Value) -> anyhow::Result<()> {
+    let s = serde_json::to_string(v)?;
+    respond_raw(stdout, &s).await
+}
+
+async fn respond_raw(stdout: &mut tokio::io::Stdout, s: &str) -> anyhow::Result<()> {
+    stdout.write_all(s.as_bytes()).await?;
+    stdout.write_all(b"\n").await?;
+    stdout.flush().await?;
+    Ok(())
+}
+
+async fn native_list_windows(msg: &Value, stdout: &mut tokio::io::Stdout) -> anyhow::Result<()> {
+    let filter = msg["params"]["arguments"]["filter"]
+        .as_str()
+        .map(|s| s.to_string());
+    let windows = tokio::task::spawn_blocking(move || cu_native::list_windows(filter.as_deref()))
+        .await
+        .map_err(|e| anyhow::anyhow!("join: {e}"))?;
+    let capped: Vec<_> = windows.into_iter().take(20).collect();
+    let text = serde_json::to_string(&capped)?;
+    let resp = json!({
+        "jsonrpc": "2.0",
+        "id": msg.get("id").cloned().unwrap_or(Value::Null),
+        "result": {
+            "content": [ { "type": "text", "text": text } ],
+            "structuredContent": { "windows": capped }
+        }
+    });
+    respond_value(stdout, &resp).await
+}

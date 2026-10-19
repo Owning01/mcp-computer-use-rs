@@ -19,7 +19,7 @@ Requiere `@modelcontextprotocol/sdk` en `migration/parity/node_modules` (`pnpm i
 ## Juez de paridad
 `migration/parity/judge.mjs` + `scenarios/cu2-basic.json`.
 Steps F2: initialize, tools/list (perfil full, 68 tools), computer_lock status.
-Nota de normalización: el step `lock` ignora `pid`, `agent` y `dir` (valores por proceso, no de contrato).
+Nota de normalización: el step `lock` ignora valores por proceso y derivados del tiempo (`pid`, `agent`, `dir`, `id`, `label`, `startedAt`, `refreshedAt`, `expireAt`, `expiresAt`, `ttl`, `ttl_ms`, `age_ms`, `expires_in_ms`).
 
     # PASS esperado (juez sin falsos positivos): A=B=origen
     node migration/parity/judge.mjs migration/parity/scenarios/cu2-basic.json

@@ -118,4 +118,5 @@ Prohibido agregar dependencias fuera de esta tabla (2 candidatos → spike contr
 
 | Fecha | Regla | Causa | Firma |
 | :--- | :--- | :--- | :--- |
-| 2026-10-18 | (v1 inicial) | — | pendiente |
+| 2026-10-18 | (v1 inicial) | — | **firmado: Octavio (chat, 2026-10-18)** |
+| 2026-10-18 | Puente F4 en JSON-RPC crudo (sin rmcp): intercepta `initialize` / `tools/list` / `tools/call` de `computer_list_windows`; el resto se proxea byte a byte al origen | La SDK 1.30 del origen declara `capabilities.tasks` en forma pre-spec-final y rmcp 3.5.1 (spec 2026-07-28) usa `extensions` y no expone `tasks/list`; el puente necesita passthrough total para paridad. rmcp entra con los handlers nativos al apagar el puente (F7/F8) | pendiente |

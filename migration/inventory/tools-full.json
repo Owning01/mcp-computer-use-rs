@@ -1,0 +1,3345 @@
+[
+ {
+  "name": "computer_screenshot",
+  "description": "Captura pantalla con auto-detección de monitor, DPI-aware, JPEG75 CatmullRom/Bicubic, smart region crop, captura directa por HWND (capture:'auto' usa PrintWindow y, si el frame sale negro/uniforme, prueba Windows.Graphics.Capture —WGC, ideal para ventanas GPU/Electron— antes de caer a GDI+), Epoch, etag diffing, etiquetas visuales Set-of-Marks y 'link:true' para guardar la imagen en disco y devolver un resource_link.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "width": {
+     "type": "number",
+     "description": "Ancho objetivo (0=original, 800 recomendado)"
+    },
+    "format": {
+     "type": "string",
+     "enum": [
+      "jpeg",
+      "png"
+     ]
+    },
+    "quality": {
+     "type": "number",
+     "description": "10-95 (default 75)"
+    },
+    "hwnd": {
+     "type": "number",
+     "description": "Captura directamente el rectángulo de una ventana específica por su HWND"
+    },
+    "x": {
+     "type": "number"
+    },
+    "y": {
+     "type": "number"
+    },
+    "w": {
+     "type": "number"
+    },
+    "h": {
+     "type": "number"
+    },
+    "bare": {
+     "type": "boolean"
+    },
+    "cursor": {
+     "type": "boolean"
+    },
+    "screen": {
+     "type": "number",
+     "description": "Índice de monitor (0=primario)"
+    },
+    "etag": {
+     "type": "string",
+     "description": "Etag anterior para diffing (evita transferir si no hay cambios)"
+    },
+    "capture": {
+     "type": "string",
+     "enum": [
+      "auto",
+      "gdi",
+      "printwindow",
+      "wgc"
+     ],
+     "description": "Método de captura: auto (default; con hwnd: PrintWindow → WGC si sale negro → GDI+), gdi (clásico CopyFromScreen), printwindow (forzado), wgc (Windows.Graphics.Capture forzado, ideal para ventanas GPU/Electron; requiere el helper nativo y no hace fallback silencioso)"
+    },
+    "link": {
+     "type": "boolean",
+     "description": "Si es true, guarda la imagen en tmp y devuelve un resource_link (file://) en vez de la imagen inline"
+    },
+    "annotate_marks": {
+     "type": "boolean",
+     "description": "Dibuja etiquetas numéricas flotantes [1], [2], [3] (Set-of-Marks) sobre los controles interactivos directamente en la imagen"
+    }
+   },
+   "additionalProperties": false
+  },
+  "title": "Captura de pantalla",
+  "annotations": {
+   "readOnlyHint": true,
+   "destructiveHint": false,
+   "idempotentHint": true,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_act",
+  "description": "Acción atómica unificada de ultra-alta velocidad y mínimo consumo de tokens. Permite interactuar con un control por texto visible ('Buscar'), ID interactivo (1, 'c1'), coordenadas {x, y} o el foco actual. Puede hacer click, doble click, click derecho, limpiar campo ('clear_first'), escribir texto ('text' o 'secret_b64'), presionar Enter ('press_enter') o cualquier tecla ('key'), y opcionalmente devolver la observación actualizada de la pantalla ('observe_after') en 1 solo turno.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "target": {
+     "description": "Texto visible a buscar (ej: 'Guardar'), ID numérico o 'c1' de computer_observe, o coordenadas {x, y}. Si se omite, actúa sobre el elemento con foco."
+    },
+    "action": {
+     "type": "string",
+     "enum": [
+      "click",
+      "double_click",
+      "right_click",
+      "hover",
+      "clear",
+      "type_only"
+     ],
+     "description": "Acción a ejecutar sobre el objetivo (default: 'click')"
+    },
+    "text": {
+     "type": "string",
+     "description": "Texto a escribir tras interactuar con el objetivo"
+    },
+    "secret_b64": {
+     "type": "string",
+     "description": "Texto sensible en base64 para escribir sin dejar rastro en logs"
+    },
+    "clear_first": {
+     "type": "boolean",
+     "description": "Borra el campo (Ctrl+A + Backspace) antes de escribir (default true si hay text)"
+    },
+    "press_enter": {
+     "type": "boolean",
+     "description": "Presiona Enter tras escribir"
+    },
+    "key": {
+     "type": "string",
+     "description": "Tecla o atajo a presionar (ej: 'Enter', 'Tab', 'Escape', 'ctrl+s', 'down')"
+    },
+    "offset_x": {
+     "type": "number",
+     "description": "Desplazamiento horizontal relativo al centro (ej: +80 para input adyacente a etiqueta)"
+    },
+    "offset_y": {
+     "type": "number",
+     "description": "Desplazamiento vertical relativo al centro"
+    },
+    "target_window": {
+     "type": "string",
+     "description": "Título de ventana a enfocar antes de actuar"
+    },
+    "behavior": {
+     "type": "string",
+     "enum": [
+      "auto",
+      "headless",
+      "humanized",
+      "foreground"
+     ],
+     "default": "auto",
+     "description": "Política de comportamiento: 'auto' (default) decide por ventana — browser/WebView/Electron → 'humanized'; app nativa con patrón UIA → 'headless' (alias: 'background'), sin patrón → 'foreground' simple. 'headless' jamás se ejecuta en browsers (devuelve background_blocked_browser). 'humanized' = trayectoria Bézier + cadencia/pausas; 'foreground' = clásico sin cambios."
+    },
+    "wait_ms": {
+     "type": "number",
+     "description": "Milisegundos de pausa tras la acción (default: 80)"
+    },
+    "observe_after": {
+     "type": "boolean",
+     "description": "Si es true, incluye en la respuesta la observación compacta de la pantalla actualizada"
+    }
+   },
+   "additionalProperties": false
+  },
+  "title": "Acción atómica unificada",
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": false,
+   "idempotentHint": false,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_observe",
+  "description": "Observación ultra-optimizada de la pantalla para agentes de IA (<250 tokens). Devuelve la ventana activa y una tabla concisa de los principales controles interactivos (botones, inputs, links) con IDs simples para usar directamente en computer_act. Mucho más rápido y económico que capturas de pantalla completas o árboles UIA masivos.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "target_window": {
+     "type": "string",
+     "description": "Título de ventana a enfocar antes de observar"
+    },
+    "limit": {
+     "type": "number",
+     "description": "Máximo número de controles a listar (default 25, previene exceso de tokens)"
+    },
+    "screenshot": {
+     "type": "boolean",
+     "description": "Si es true, toma además una captura de pantalla"
+    },
+    "link": {
+     "type": "boolean",
+     "description": "Si es true (default cuando screenshot=true), guarda la captura en disco y devuelve una URI file:// en vez de base64 inline"
+    },
+    "format": {
+     "type": "string",
+     "enum": [
+      "table",
+      "json"
+     ],
+     "description": "Formato de salida: 'table' (markdown conciso ultra-bajo en tokens) o 'json' (default table)"
+    }
+   },
+   "additionalProperties": false
+  },
+  "title": "Observar pantalla (compacto)",
+  "annotations": {
+   "readOnlyHint": true,
+   "destructiveHint": false,
+   "idempotentHint": true,
+   "openWorldHint": false
+  },
+  "outputSchema": {
+   "type": "object",
+   "properties": {
+    "ok": {
+     "type": "boolean"
+    },
+    "summary": {
+     "type": "string"
+    },
+    "window": {
+     "type": "object"
+    },
+    "count": {
+     "type": "number"
+    }
+   },
+   "required": [
+    "ok"
+   ]
+  }
+ },
+ {
+  "name": "computer_shell",
+  "description": "Ejecución unificada de comandos en PowerShell. Soporta ejecución síncrona con truncado inteligente de salida para ahorrar tokens, ejecución en segundo plano ('background: true') y aislamiento en escritorio Win32 sandbox ('isolated_desktop: true').",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "command": {
+     "type": "string",
+     "minLength": 1,
+     "description": "Comando a ejecutar en PowerShell"
+    },
+    "cwd": {
+     "type": "string",
+     "description": "Directorio de trabajo (opcional)"
+    },
+    "background": {
+     "type": "boolean",
+     "description": "Si es true, lanza el proceso en segundo plano y retorna su PID de inmediato"
+    },
+    "isolated_desktop": {
+     "type": "boolean",
+     "description": "Si es true, ejecuta en un escritorio Win32 aislado (Winsta0\\CodexSandboxDesk) sin interferir con la pantalla del usuario"
+    },
+    "timeout": {
+     "type": "number",
+     "minimum": 1,
+     "maximum": 600000,
+     "description": "Tiempo límite en milisegundos (default: 60000)"
+    }
+   },
+   "required": [
+    "command"
+   ],
+   "additionalProperties": false
+  },
+  "title": "Ejecución unificada de comandos",
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": true,
+   "idempotentHint": false,
+   "openWorldHint": true
+  }
+ },
+ {
+  "name": "computer_wait",
+  "description": "Espera unificada multivariada: espera a que la pantalla se estabilice ('stable'), a que aparezca o desaparezca un texto ('text'), a que finalice una descarga ('download') o una pausa en milisegundos ('time').",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "condition": {
+     "type": "string",
+     "enum": [
+      "stable",
+      "text",
+      "download",
+      "time"
+     ],
+     "description": "Tipo de espera: 'stable' (default), 'text', 'download', 'time'"
+    },
+    "text": {
+     "type": "string",
+     "description": "Texto a monitorear (requerido para condition='text')"
+    },
+    "disappear": {
+     "type": "boolean",
+     "description": "Para condition='text', si es true espera a que el texto DESAPAREZCA (ej: spinners o 'Cargando...')"
+    },
+    "timeout_ms": {
+     "type": "number",
+     "description": "Tiempo máximo de espera en milisegundos (default: 10000)"
+    },
+    "target_window": {
+     "type": "string",
+     "description": "Ventana objetivo a monitorear (opcional)"
+    }
+   },
+   "additionalProperties": false
+  },
+  "title": "Espera unificada (estable/texto/descarga/tiempo)",
+  "annotations": {
+   "readOnlyHint": true,
+   "destructiveHint": false,
+   "idempotentHint": true,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_zoom",
+  "description": "Zoom de una región física de pantalla a resolución nativa y escalado controlado (NearestNeighbor por defecto para texto; smooth:true usa HighQualityBicubic). Read-only. Las coordenadas del modelo siguen siendo físicas: el pixel central de la imagen ampliada corresponde a region.x + dx/scale.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "x": {
+     "type": "number",
+     "description": "Coordenada X física de la región"
+    },
+    "y": {
+     "type": "number",
+     "description": "Coordenada Y física de la región"
+    },
+    "w": {
+     "type": "number",
+     "description": "Ancho físico de la región (default 200)"
+    },
+    "h": {
+     "type": "number",
+     "description": "Alto físico de la región (default 150)"
+    },
+    "scale": {
+     "type": "number",
+     "description": "Factor de ampliación 1..4 (default 2)"
+    },
+    "smooth": {
+     "type": "boolean",
+     "description": "true = HighQualityBicubic; false (default) = NearestNeighbor (mejor para texto)"
+    },
+    "format": {
+     "type": "string",
+     "enum": [
+      "png",
+      "jpeg"
+     ],
+     "description": "default png"
+    },
+    "quality": {
+     "type": "number",
+     "description": "Calidad JPEG 10-95 (default 90)"
+    },
+    "link": {
+     "type": "boolean",
+     "description": "Si es true, guarda la imagen en tmp y devuelve un resource_link (file://) en vez de la imagen inline"
+    }
+   },
+   "additionalProperties": false
+  },
+  "title": "Zoom de región",
+  "annotations": {
+   "readOnlyHint": true,
+   "destructiveHint": false,
+   "idempotentHint": true,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_screen_info",
+  "description": "Devuelve información rápida del entorno visual en ~30ms: DPI scaling (ej: 125%), resolución del monitor primario y virtual, lista de monitores y posición actual del cursor. Esencial para calcular coordenadas y conocer el factor de escala.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {},
+   "additionalProperties": false
+  },
+  "title": "Info de pantalla",
+  "annotations": {
+   "readOnlyHint": true,
+   "destructiveHint": false,
+   "idempotentHint": true,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_hotkey",
+  "description": "Ejecuta una combinación de teclas rápidamente (ej: 'ctrl+c', 'ctrl+v', 'win+r', 'alt+f4', 'ctrl+shift+esc', 'ctrl+s'). Mucho más rápido y ergonómico que presionar teclas individuales.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "combo": {
+     "type": "string",
+     "description": "Atajo de teclado separado por '+' (ej: 'ctrl+s', 'alt+tab', 'win+d')"
+    }
+   },
+   "required": [
+    "combo"
+   ],
+   "additionalProperties": false
+  },
+  "title": "Atajo de teclado",
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": false,
+   "idempotentHint": false,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_click_text",
+  "description": "Busca un texto visible vía UIA (50ms) o OCR y hace click en su centro. Soporta foco automático ('target_window'), tipeo directo ('type_text'), borrado previo ('clear_first'), Enter automático ('press_enter'), click humano ('human_like'), auto-scroll hacia abajo ('auto_scroll') y espera modal ('wait_modal_after') en 1 solo turno.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "text": {
+     "type": "string",
+     "description": "Texto o palabra clave a buscar en pantalla"
+    },
+    "hwnd": {
+     "type": "number",
+     "description": "HWND de la ventana objetivo (opcional, por defecto la activa)"
+    },
+    "target_window": {
+     "type": "string",
+     "description": "Título de ventana para traer al frente automáticamente antes de actuar"
+    },
+    "button": {
+     "type": "string",
+     "enum": [
+      "left",
+      "right",
+      "middle"
+     ],
+     "description": "Botón del mouse (default left)"
+    },
+    "double_click": {
+     "type": "boolean",
+     "description": "Si es true, ejecuta doble click"
+    },
+    "exact": {
+     "type": "boolean",
+     "description": "Si es true, busca coincidencia exacta de texto"
+    },
+    "case_sensitive": {
+     "type": "boolean",
+     "description": "Si es true, distingue mayúsculas y minúsculas"
+    },
+    "occurrence": {
+     "type": "number",
+     "description": "Índice de coincidencia cuando hay varios resultados (1=primero, 2=segundo, -1=último, default 1)"
+    },
+    "offset_x": {
+     "type": "number",
+     "description": "Desplazamiento horizontal en píxeles relativo al centro (ej: +80 para clickear en un input adyacente a una etiqueta)"
+    },
+    "offset_y": {
+     "type": "number",
+     "description": "Desplazamiento vertical en píxeles relativo al centro"
+    },
+    "clear_first": {
+     "type": "boolean",
+     "description": "Si es true, ejecuta Ctrl+A + Backspace tras clickear para vaciar el input"
+    },
+    "type_text": {
+     "type": "string",
+     "description": "Texto para escribir inmediatamente tras el click"
+    },
+    "secret_b64": {
+     "type": "string",
+     "description": "Texto sensible en base64 para escribir sin dejar rastro en logs"
+    },
+    "press_enter": {
+     "type": "boolean",
+     "description": "Si es true, presiona Enter inmediatamente después de escribir"
+    },
+    "human_like": {
+     "type": "boolean",
+     "description": "Si es true, usa trayectoria curva Bézier y tiempo de pulsación natural para evitar detección de bots"
+    },
+    "behavior": {
+     "type": "string",
+     "enum": [
+      "auto",
+      "headless",
+      "humanized",
+      "foreground"
+     ],
+     "default": "auto",
+     "description": "Política de comportamiento: 'auto' (default) decide por ventana — browser/WebView/Electron → 'humanized'; app nativa con patrón UIA → 'headless' (alias: 'background'), sin patrón → 'foreground' simple. 'headless' jamás se ejecuta en browsers (devuelve background_blocked_browser). 'humanized' = trayectoria Bézier + cadencia/pausas; 'foreground' = clásico sin cambios."
+    },
+    "auto_scroll": {
+     "type": "boolean",
+     "description": "Si es true y el texto no es visible inicialmente, desplaza la ventana hacia abajo hasta encontrarlo"
+    },
+    "max_scrolls": {
+     "type": "number",
+     "description": "Máximo número de scrolls hacia abajo para auto_scroll (default 5)"
+    },
+    "wait_modal_after": {
+     "type": "boolean",
+     "description": "Si es true, espera a que aparezca un diálogo modal tras el click"
+    },
+    "dismiss_overlay_first": {
+     "type": "boolean",
+     "description": "Si es true, intenta cerrar previamente banners de cookies o modales superpuestos antes de buscar el texto (recomendado en web)"
+    }
+   },
+   "required": [
+    "text"
+   ],
+   "additionalProperties": false
+  },
+  "title": "Click por texto",
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": false,
+   "idempotentHint": false,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_map_ui",
+  "description": "Mapea todos los controles interactivos de la ventana (botones, inputs, links, menús) asignándoles un ID numérico simple (1, 2, 3...) y coordenadas exactas. Permite hacer click directo por ID con computer_click sin vision ni cálculos de píxeles.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "hwnd": {
+     "type": "number",
+     "description": "HWND de la ventana (opcional, default ventana activa)"
+    },
+    "target_window": {
+     "type": "string",
+     "description": "Título de ventana para traer al frente antes de mapear"
+    }
+   },
+   "additionalProperties": false
+  },
+  "title": "Mapa de UI",
+  "annotations": {
+   "readOnlyHint": true,
+   "destructiveHint": false,
+   "idempotentHint": true,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_click",
+  "description": "Click del mouse en x,y físico, por ID interactivo de computer_map_ui o por ref estable de computer_snapshot.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "x": {
+     "type": "number"
+    },
+    "y": {
+     "type": "number"
+    },
+    "id": {
+     "type": "number",
+     "description": "ID numérico de control obtenido previamente con computer_map_ui o computer_snapshot"
+    },
+    "ref": {
+     "type": "string",
+     "description": "Ref estable devuelta por computer_snapshot"
+    },
+    "button": {
+     "type": "string",
+     "enum": [
+      "left",
+      "right",
+      "middle"
+     ]
+    },
+    "target_window": {
+     "type": "string",
+     "description": "Enfoca la ventana indicada antes de clickear"
+    },
+    "human_like": {
+     "type": "boolean",
+     "description": "Usa trayectoria natural Bézier y pulsación humana anti-detección"
+    },
+    "snapshot_after": {
+     "type": "boolean",
+     "description": "Si es true, toma automáticamente un snapshot fresco del estado tras la acción"
+    },
+    "behavior": {
+     "type": "string",
+     "enum": [
+      "auto",
+      "headless",
+      "humanized",
+      "foreground"
+     ],
+     "default": "auto",
+     "description": "Política de comportamiento: 'auto' (default) decide por ventana — browser/WebView/Electron → 'humanized'; app nativa con patrón UIA → 'headless' (alias: 'background'), sin patrón → 'foreground' simple. 'headless' jamás se ejecuta en browsers (devuelve background_blocked_browser). 'humanized' = trayectoria Bézier + cadencia/pausas; 'foreground' = clásico sin cambios."
+    }
+   },
+   "additionalProperties": false
+  },
+  "title": "Click",
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": false,
+   "idempotentHint": false,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_double_click",
+  "description": "Doble click rápido en x,y físico, por ID interactivo de computer_map_ui o por ref estable de computer_snapshot.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "x": {
+     "type": "number"
+    },
+    "y": {
+     "type": "number"
+    },
+    "id": {
+     "type": "number",
+     "description": "ID numérico de control obtenido previamente con computer_map_ui o computer_snapshot"
+    },
+    "ref": {
+     "type": "string",
+     "description": "Ref estable devuelta por computer_snapshot"
+    },
+    "target_window": {
+     "type": "string"
+    },
+    "human_like": {
+     "type": "boolean"
+    },
+    "snapshot_after": {
+     "type": "boolean",
+     "description": "Si es true, toma automáticamente un snapshot fresco del estado tras la acción"
+    },
+    "behavior": {
+     "type": "string",
+     "enum": [
+      "auto",
+      "headless",
+      "humanized",
+      "foreground"
+     ],
+     "default": "auto",
+     "description": "Política de comportamiento: 'auto' (default) decide por ventana — browser/WebView/Electron → 'humanized'; app nativa con patrón UIA → 'headless' (alias: 'background'), sin patrón → 'foreground' simple. 'headless' jamás se ejecuta en browsers (devuelve background_blocked_browser). 'humanized' = trayectoria Bézier + cadencia/pausas; 'foreground' = clásico sin cambios."
+    }
+   },
+   "additionalProperties": false
+  },
+  "title": "Doble click",
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": false,
+   "idempotentHint": false,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_human_click",
+  "description": "Click humano anti-detección con trayectoria curva Bézier, velocidad no lineal y tiempo de pulsación realista (70-120ms). Esencial para pasar checkboxes de Cloudflare Turnstile, reCAPTCHA y evitar heurísticas de bot.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "x": {
+     "type": "number"
+    },
+    "y": {
+     "type": "number"
+    },
+    "id": {
+     "type": "number"
+    },
+    "button": {
+     "type": "string",
+     "enum": [
+      "left",
+      "right",
+      "middle"
+     ]
+    },
+    "double_click": {
+     "type": "boolean"
+    },
+    "target_window": {
+     "type": "string"
+    }
+   },
+   "additionalProperties": false
+  },
+  "title": "Click humano",
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": false,
+   "idempotentHint": false,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_copy",
+  "description": "Copia la selección actual (Ctrl+C) y devuelve el texto del portapapeles directamente en la respuesta en 1 solo turno.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "target_window": {
+     "type": "string",
+     "description": "Enfoca la ventana antes de copiar"
+    }
+   },
+   "additionalProperties": false
+  },
+  "title": "Copiar selección",
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": false,
+   "idempotentHint": false,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_paste",
+  "description": "Pega texto plano o secreto (Ctrl+V) en el control enfocado de forma instantánea (100x más rápido que escribir letra por letra, sin fallos de caracteres especiales).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "text": {
+     "type": "string",
+     "description": "Texto plano para pegar"
+    },
+    "secret_b64": {
+     "type": "string",
+     "description": "Base64 de texto sensible para pegar"
+    },
+    "press_enter": {
+     "type": "boolean",
+     "description": "Si es true, presiona Enter inmediatamente después de pegar"
+    },
+    "target_window": {
+     "type": "string",
+     "description": "Enfoca la ventana antes de pegar"
+    },
+    "snapshot_after": {
+     "type": "boolean",
+     "description": "Si es true, toma automáticamente un snapshot fresco del estado tras la acción"
+    }
+   },
+   "additionalProperties": false
+  },
+  "title": "Pegar texto",
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": false,
+   "idempotentHint": false,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_fill_form",
+  "description": "Rellena automáticamente múltiples campos de un formulario (usuario, password, inputs) y presiona el botón de envío en 1 sola llamada.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "fields": {
+     "type": "array",
+     "description": "Lista de campos a rellenar",
+     "items": {
+      "type": "object",
+      "required": [
+       "label"
+      ],
+      "properties": {
+       "label": {
+        "type": "string",
+        "description": "Etiqueta o texto cercano al input"
+       },
+       "id": {
+        "type": "string",
+        "description": "ID interactivo o ref_id de computer_map_ui (ej: 'c1', 'c2')"
+       },
+       "ref": {
+        "type": "string",
+        "description": "Ref alternativo de computer_snapshot o ref_id de CDP"
+       },
+       "value": {
+        "type": "string",
+        "description": "Valor a escribir o pegar"
+       },
+       "secret_b64": {
+        "type": "string",
+        "description": "Base64 para contraseñas"
+       },
+       "clear_first": {
+        "type": "boolean",
+        "description": "Vacía el campo antes de escribir (default true)"
+       },
+       "offset_x": {
+        "type": "number",
+        "description": "Desplazamiento horizontal hacia el campo de texto (default 80)"
+       },
+       "offset_y": {
+        "type": "number",
+        "description": "Desplazamiento vertical (default 0)"
+       }
+      }
+     }
+    },
+    "submit_button": {
+     "type": "string",
+     "description": "Texto del botón a clickear tras rellenar los campos (ej: 'Iniciar sesión', 'Guardar')"
+    },
+    "target_window": {
+     "type": "string",
+     "description": "Enfoca la ventana objetivo antes de iniciar"
+    }
+   },
+   "required": [
+    "fields"
+   ],
+   "additionalProperties": false
+  },
+  "title": "Rellenar formulario",
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": false,
+   "idempotentHint": false,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_detect_block",
+  "description": "Detecta automáticamente si una página web o app está bloqueando al agente por sospecha de bot (Cloudflare Turnstile, reCAPTCHA, hCaptcha, Google 'navegador no seguro', WAF). Devuelve el tipo de bloqueo, recomendaciones y la posición física del checkbox de verificación para superarlo como humano. Con solve:true, si hay bloqueo delega en la estrategia auto de computer_pass_barrier (checkbox humano/espera/recarga/Chrome real/handoff).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "hwnd": {
+     "type": "number"
+    },
+    "target_window": {
+     "type": "string"
+    },
+    "solve": {
+     "type": "boolean",
+     "description": "Si es true y hay bloqueo, ejecuta la estrategia auto de computer_pass_barrier y devuelve el resultado combinado (default false: respuesta clásica intacta)"
+    }
+   },
+   "additionalProperties": false
+  },
+  "title": "Detectar bloqueo/captcha",
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": false,
+   "idempotentHint": false,
+   "openWorldHint": true
+  }
+ },
+ {
+  "name": "computer_background_action",
+  "description": "Ejecuta Invoke/Toggle/Select/Expand/Collapse/SetValue/Focus sobre controles UIA sin mover el mouse ni robar foco, SOLO en apps nativas. Guard de ventana: si la ventana es un navegador/WebView/Electron (Chrome_WidgetWin, MozillaWindowClass o proceso chrome/msedge/firefox/brave/opera/vivaldi/iexplore/msedgewebview2/electron) devuelve background_blocked_browser sin ejecutar nada; para contenido web usá computer_human_click (foreground humano) o computer_pass_barrier. Resuelve el elemento por ref (computer_snapshot), id (computer_map_ui) o name/automation_id, ejecuta el patrón UIA correspondiente y devuelve method_used; si ningún patrón sirve, con fallback:'foreground' hace un click clásico (solo porque el guard ya confirmó que es nativa) o con fallback:'none' (default) devuelve background_unsupported. No es stealth ni evade protecciones.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "action": {
+     "type": "string",
+     "enum": [
+      "invoke",
+      "toggle",
+      "select",
+      "expand",
+      "collapse",
+      "set_value",
+      "focus"
+     ]
+    },
+    "ref": {
+     "type": "string",
+     "description": "Ref estable devuelta por computer_snapshot"
+    },
+    "id": {
+     "type": "number",
+     "description": "ID interactivo de computer_map_ui / computer_snapshot"
+    },
+    "name": {
+     "type": "string",
+     "description": "Nombre UIA del control (match parcial, case-insensitive)"
+    },
+    "automation_id": {
+     "type": "string",
+     "description": "AutomationId UIA exacto"
+    },
+    "value": {
+     "type": "string",
+     "description": "Valor a asignar (solo action:'set_value')"
+    },
+    "target_window": {
+     "type": "string",
+     "description": "Título de la ventana objetivo (default: activa)"
+    },
+    "hwnd": {
+     "type": "number",
+     "description": "HWND de la ventana objetivo (default: activa)"
+    },
+    "fallback": {
+     "type": "string",
+     "enum": [
+      "none",
+      "foreground"
+     ],
+     "description": "none (default): error background_unsupported explicando que la app necesita foreground; foreground: click clásico si ningún patrón UIA sirve (ventana nativa validada)"
+    }
+   },
+   "required": [
+    "action"
+   ],
+   "additionalProperties": false
+  },
+  "title": "Acción UIA sin foco (apps nativas)",
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": false,
+   "idempotentHint": false,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_pass_barrier",
+  "description": "Estrategia completa ante un bloqueo anti-bot detectado (Turnstile, reCAPTCHA, hCaptcha, Cloudflare challenge/WAF, Google 'navegador no seguro'): detecta con computer_detect_block, clasifica el tipo y en modo auto ejecuta checkbox humano Bézier con offsets y pausas 1-2 s + re-detección, o espera pasiva del challenge + recarga con backoff (F5), o abre la URL en el Chrome real del usuario (computer_login), o hace handoff humano (computer_alert_user + polling de desaparición del bloque). Devuelve type, strategy_used, attempts, resolved, handled_by_user y fingerprints antes/después. Límites éticos: solo checkbox humano, esperas, recarga, Chrome real y handoff; nunca resuelve puzzles con servicios externos ni evade protecciones.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "hwnd": {
+     "type": "number",
+     "description": "HWND de la ventana bloqueada (default: activa)"
+    },
+    "target_window": {
+     "type": "string",
+     "description": "Título de la ventana bloqueada"
+    },
+    "strategy": {
+     "type": "string",
+     "enum": [
+      "auto",
+      "checkbox",
+      "wait",
+      "reload",
+      "real_chrome",
+      "ask_user"
+     ],
+     "description": "auto (default) decide por tipo de bloqueo; el resto fuerza una estrategia"
+    },
+    "max_attempts": {
+     "type": "number",
+     "minimum": 1,
+     "maximum": 10,
+     "description": "Reintentos de checkbox (default 3)"
+    },
+    "timeout_ms": {
+     "type": "number",
+     "description": "Presupuesto total y espera del handoff humano en ms (default 45000)"
+    },
+    "backoff_ms": {
+     "type": "number",
+     "description": "Espera antes de recargar en bloqueos WAF (default 20000)"
+    },
+    "async": {
+     "type": "boolean",
+     "default": false,
+     "description": "Si es true, arranca una task MCP 2026 y devuelve {task} de inmediato sin esperar el resultado (polling con tasks/get, payload con tasks/result, cancelable con tasks/cancel). Default false: comportamiento síncrono clásico intacto."
+    }
+   },
+   "additionalProperties": false
+  },
+  "title": "Pasar barrera anti-bot",
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": false,
+   "idempotentHint": false,
+   "openWorldHint": true
+  },
+  "execution": {
+   "taskSupport": "optional"
+  }
+ },
+ {
+  "name": "computer_move",
+  "description": "Mueve el cursor a x,y físico absoluto.",
+  "inputSchema": {
+   "type": "object",
+   "additionalProperties": false,
+   "properties": {
+    "x": {
+     "type": "number"
+    },
+    "y": {
+     "type": "number"
+    }
+   },
+   "required": [
+    "x",
+    "y"
+   ]
+  },
+  "title": "Mover cursor",
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": false,
+   "idempotentHint": true,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_drag",
+  "description": "Arrastra desde fromX,fromY hasta toX,toY.",
+  "inputSchema": {
+   "type": "object",
+   "additionalProperties": false,
+   "properties": {
+    "fromX": {
+     "type": "number"
+    },
+    "fromY": {
+     "type": "number"
+    },
+    "toX": {
+     "type": "number"
+    },
+    "toY": {
+     "type": "number"
+    },
+    "button": {
+     "type": "string",
+     "enum": [
+      "left",
+      "right",
+      "middle"
+     ]
+    },
+    "behavior": {
+     "type": "string",
+     "enum": [
+      "auto",
+      "headless",
+      "humanized",
+      "foreground"
+     ],
+     "default": "auto",
+     "description": "Política de comportamiento: 'auto' (default) decide por ventana — browser/WebView/Electron → 'humanized'; app nativa con patrón UIA → 'headless' (alias: 'background'), sin patrón → 'foreground' simple. 'headless' jamás se ejecuta en browsers (devuelve background_blocked_browser). 'humanized' = trayectoria Bézier + cadencia/pausas; 'foreground' = clásico sin cambios."
+    }
+   },
+   "required": [
+    "fromX",
+    "fromY",
+    "toX",
+    "toY"
+   ]
+  },
+  "title": "Arrastrar",
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": false,
+   "idempotentHint": false,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_key",
+  "description": "Presiona tecla (Enter, Tab, Escape, Backspace, ArrowDown, c, v, a, etc.) con modificadores opcionales [ctrl, shift, alt, meta].",
+  "inputSchema": {
+   "type": "object",
+   "additionalProperties": false,
+   "properties": {
+    "key": {
+     "type": "string",
+     "minLength": 1
+    },
+    "action": {
+     "type": "string",
+     "enum": [
+      "tap",
+      "down",
+      "up"
+     ]
+    },
+    "mods": {
+     "type": "array",
+     "items": {
+      "type": "string",
+      "enum": [
+       "ctrl",
+       "shift",
+       "alt",
+       "meta"
+      ]
+     },
+     "uniqueItems": true
+    }
+   },
+   "required": [
+    "key"
+   ]
+  },
+  "title": "Tecla",
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": false,
+   "idempotentHint": false,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_type",
+  "description": "Escribe texto Unicode en foco. Soporta 'secret_b64' para credenciales seguras (Zero-Leak PIN/Windows Hello), 'clear_first' para vaciar el input antes, 'press_enter' y 'human_jitter' (escritura cadenciada humana anti-bot).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "text": {
+     "type": "string",
+     "description": "Texto plano para escribir"
+    },
+    "secret_b64": {
+     "type": "string",
+     "description": "Base64 de texto sensible (se decodifica solo en memoria y nunca se loggea)"
+    },
+    "is_secret": {
+     "type": "boolean",
+     "description": "Si es true, no loggea el contenido"
+    },
+    "clear_first": {
+     "type": "boolean",
+     "description": "Si es true, selecciona todo y borra antes de escribir"
+    },
+    "press_enter": {
+     "type": "boolean",
+     "description": "Si es true, presiona Enter inmediatamente después de escribir"
+    },
+    "human_jitter": {
+     "type": "boolean",
+     "description": "Escribe con cadencia humana variable (45-110ms) para evadir detección de bots"
+    },
+    "snapshot_after": {
+     "type": "boolean",
+     "description": "Si es true, toma automáticamente un snapshot fresco del estado tras la acción"
+    },
+    "behavior": {
+     "type": "string",
+     "enum": [
+      "auto",
+      "headless",
+      "humanized",
+      "foreground"
+     ],
+     "default": "auto",
+     "description": "Política de comportamiento: 'auto' (default) decide por ventana — browser/WebView/Electron → 'humanized'; app nativa con patrón UIA → 'headless' (alias: 'background'), sin patrón → 'foreground' simple. 'headless' jamás se ejecuta en browsers (devuelve background_blocked_browser). 'humanized' = trayectoria Bézier + cadencia/pausas; 'foreground' = clásico sin cambios."
+    }
+   },
+   "additionalProperties": false,
+   "oneOf": [
+    {
+     "required": [
+      "text"
+     ]
+    },
+    {
+     "required": [
+      "secret_b64"
+     ]
+    }
+   ]
+  },
+  "title": "Escribir texto",
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": false,
+   "idempotentHint": false,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_scroll_to_text",
+  "description": "Desplaza la ventana hacia abajo de forma continua hasta que el texto objetivo sea visible en pantalla, devolviendo sus coordenadas.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "text": {
+     "type": "string",
+     "description": "Texto a buscar y hacer visible con scroll"
+    },
+    "max_scrolls": {
+     "type": "number",
+     "description": "Máximo número de desplazamientos (default 5)"
+    },
+    "scroll_amount": {
+     "type": "number",
+     "description": "Cantidad de desplazamiento por paso (default -400 para scroll abajo)"
+    },
+    "target_window": {
+     "type": "string",
+     "description": "Enfoca la ventana antes de scrollear"
+    }
+   },
+   "required": [
+    "text"
+   ],
+   "additionalProperties": false
+  },
+  "title": "Scroll hasta texto",
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": false,
+   "idempotentHint": false,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_handle_file_dialog",
+  "description": "Automatiza la ventana modal de Windows 'Guardar como' o 'Abrir archivo' (#32770): inyecta la ruta del archivo y confirma el diálogo en ~100ms sin intervención manual.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "file_path": {
+     "type": "string",
+     "description": "Ruta absoluta del archivo para guardar o abrir"
+    },
+    "action": {
+     "type": "string",
+     "enum": [
+      "save",
+      "open"
+     ],
+     "description": "Acción a realizar ('save' o 'open')"
+    }
+   },
+   "required": [
+    "file_path"
+   ],
+   "additionalProperties": false
+  },
+  "title": "Diálogo de archivo",
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": true,
+   "idempotentHint": false,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_window_action",
+  "description": "Controla el estado y posición de la ventana activa: 'maximize', 'minimize', 'restore', 'close', 'snap_left', 'snap_right', 'move_resize' (posicionamiento con compensación de bordes invisibles DWM para pixel-perfect alignment), o 'dismiss_dialogs' (cierra ventanas modales/popups nativos bloqueantes). Para 'close' se intenta elicitar confirmación si el cliente lo soporta.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "action": {
+     "type": "string",
+     "enum": [
+      "maximize",
+      "minimize",
+      "restore",
+      "close",
+      "snap_left",
+      "snap_right",
+      "move_resize",
+      "dismiss_dialogs"
+     ]
+    },
+    "target_window": {
+     "type": "string",
+     "description": "Título de la ventana objetivo (opcional, default activa)"
+    },
+    "confirm": {
+     "type": "boolean",
+     "description": "Solo para action:'close'. true evita/acepta la elicitation de confirmación"
+    },
+    "x": {
+     "type": "number",
+     "description": "Coordenada X en píxeles (para action:'move_resize')"
+    },
+    "y": {
+     "type": "number",
+     "description": "Coordenada Y en píxeles (para action:'move_resize')"
+    },
+    "width": {
+     "type": "number",
+     "description": "Ancho en píxeles (para action:'move_resize')"
+    },
+    "height": {
+     "type": "number",
+     "description": "Alto en píxeles (para action:'move_resize')"
+    }
+   },
+   "required": [
+    "action"
+   ],
+   "additionalProperties": false
+  },
+  "title": "Acción de ventana",
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": true,
+   "idempotentHint": false,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_upload_file",
+  "description": "Sube o arrastra un archivo a una página web o aplicación (Google Drive, Gmail, Slack, Discord, zonas de drop web). Carga el archivo en el portapapeles como Shell FileDrop (CF_HDROP), hace click en la zona de drop e inyecta la subida en 1 solo paso.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "file_path": {
+     "type": "string",
+     "description": "Ruta absoluta del archivo en disco para subir"
+    },
+    "target_x": {
+     "type": "number",
+     "description": "Coordenada X de la zona de subida / drop zone"
+    },
+    "target_y": {
+     "type": "number",
+     "description": "Coordenada Y de la zona de subida / drop zone"
+    },
+    "target_text": {
+     "type": "string",
+     "description": "Etiqueta o texto de la zona de drop para auto-localizarla (ej: 'Arrastra archivos', 'Drop files')"
+    },
+    "target_window": {
+     "type": "string",
+     "description": "Enfoca la ventana antes de subir"
+    }
+   },
+   "required": [
+    "file_path"
+   ],
+   "additionalProperties": false
+  },
+  "title": "Subir archivo",
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": true,
+   "idempotentHint": false,
+   "openWorldHint": true
+  }
+ },
+ {
+  "name": "computer_alert_user",
+  "description": "Alerta al usuario mediante sonido del sistema y notificación flotante de Windows cuando se requiere intervención humana (código 2FA en el móvil, autenticación biométrica o CAPTCHA complejo).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "message": {
+     "type": "string",
+     "description": "Mensaje a mostrar al usuario"
+    },
+    "sound": {
+     "type": "boolean",
+     "description": "Si es true, reproduce un sonido del sistema (default true)"
+    }
+   },
+   "required": [
+    "message"
+   ],
+   "additionalProperties": false
+  },
+  "title": "Alertar al usuario",
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": false,
+   "idempotentHint": true,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_scroll",
+  "description": "Scroll en x,y (dy vertical, dx horizontal).",
+  "inputSchema": {
+   "type": "object",
+   "additionalProperties": false,
+   "properties": {
+    "x": {
+     "type": "number"
+    },
+    "y": {
+     "type": "number"
+    },
+    "dy": {
+     "type": "number"
+    },
+    "dx": {
+     "type": "number"
+    },
+    "behavior": {
+     "type": "string",
+     "enum": [
+      "auto",
+      "headless",
+      "humanized",
+      "foreground"
+     ],
+     "default": "auto",
+     "description": "Política de comportamiento: 'auto' (default) decide por ventana — browser/WebView/Electron → 'humanized'; app nativa con patrón UIA → 'headless' (alias: 'background'), sin patrón → 'foreground' simple. 'headless' jamás se ejecuta en browsers (devuelve background_blocked_browser). 'humanized' = trayectoria Bézier + cadencia/pausas; 'foreground' = clásico sin cambios."
+    }
+   },
+   "required": [
+    "dy"
+   ]
+  },
+  "title": "Scroll",
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": false,
+   "idempotentHint": false,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_batch",
+  "description": "Ejecución atómica en lote: clicks, teclas, tipeo, hotkeys con parada en primer error (stop_on_first_error) y captura final integrada en un solo comando ultra rápido.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "actions": {
+     "type": "array",
+     "minItems": 1,
+     "maxItems": 100,
+     "items": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+       "type"
+      ],
+      "properties": {
+       "type": {
+        "type": "string",
+        "enum": [
+         "click",
+         "dblclick",
+         "double_click",
+         "move",
+         "drag",
+         "scroll",
+         "key",
+         "type",
+         "hotkey",
+         "sleep",
+         "delay"
+        ]
+       },
+       "x": {
+        "type": "number"
+       },
+       "y": {
+        "type": "number"
+       },
+       "fromX": {
+        "type": "number"
+       },
+       "fromY": {
+        "type": "number"
+       },
+       "toX": {
+        "type": "number"
+       },
+       "toY": {
+        "type": "number"
+       },
+       "button": {
+        "type": "string"
+       },
+       "key": {
+        "type": "string"
+       },
+       "mods": {
+        "type": "array",
+        "items": {
+         "type": "string"
+        }
+       },
+       "combo": {
+        "type": "string"
+       },
+       "ms": {
+        "type": "number"
+       },
+       "action": {
+        "type": "string"
+       },
+       "text": {
+        "type": "string"
+       },
+       "secret_b64": {
+        "type": "string"
+       },
+       "is_secret": {
+        "type": "boolean"
+       },
+       "dx": {
+        "type": "number"
+       },
+       "dy": {
+        "type": "number"
+       }
+      }
+     }
+    },
+    "screenshot": {
+     "type": "object"
+    },
+    "delay_ms": {
+     "type": "number"
+    },
+    "verify": {
+     "type": "object"
+    },
+    "expected_epoch": {
+     "type": "number",
+     "description": "Verifica que el epoch de UI no esté obsoleto"
+    },
+    "async": {
+     "type": "boolean",
+     "default": false,
+     "description": "Si es true, arranca una task MCP 2026 y devuelve {task} de inmediato sin esperar el resultado (polling con tasks/get, payload con tasks/result, cancelable con tasks/cancel). Default false: comportamiento síncrono clásico intacto."
+    }
+   },
+   "required": [
+    "actions"
+   ],
+   "additionalProperties": false
+  },
+  "title": "Lote atómico",
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": false,
+   "idempotentHint": false,
+   "openWorldHint": false
+  },
+  "execution": {
+   "taskSupport": "optional"
+  }
+ },
+ {
+  "name": "computer_clipboard",
+  "description": "Lee o establece el portapapeles del sistema (100x más rápido que typing carácter por carácter).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "action": {
+     "type": "string",
+     "enum": [
+      "get",
+      "set"
+     ],
+     "description": "get para leer, set para escribir"
+    },
+    "text": {
+     "type": "string",
+     "description": "Texto a colocar en el portapapeles"
+    }
+   },
+   "required": [
+    "action"
+   ],
+   "additionalProperties": false
+  },
+  "title": "Portapapeles",
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": false,
+   "idempotentHint": false,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_focus_window",
+  "description": "Trae una ventana al frente por HWND o filtro de título (supera LockSetForegroundWindow con AttachThreadInput).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "hwnd": {
+     "type": "number",
+     "description": "Handle de la ventana"
+    },
+    "title": {
+     "type": "string",
+     "description": "Substring o título de la ventana"
+    }
+   },
+   "additionalProperties": false
+  },
+  "title": "Enfocar ventana",
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": false,
+   "idempotentHint": true,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_active_window",
+  "description": "Devuelve la ventana activa en primer plano (HWND, título, proceso, PID y coordenadas rectangulares).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {},
+   "additionalProperties": false
+  },
+  "title": "Ventana activa",
+  "annotations": {
+   "readOnlyHint": true,
+   "destructiveHint": false,
+   "idempotentHint": true,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_wait_for",
+  "description": "Espera de forma declarativa hasta que una ventana esté activa, un elemento UIA aparezca, o surja un diálogo modal del sistema (UAC / Guardar como / Alerta).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "title": {
+     "type": "string",
+     "description": "Título de la ventana esperada"
+    },
+    "hwnd": {
+     "type": "number",
+     "description": "HWND de la ventana esperada"
+    },
+    "name": {
+     "type": "string",
+     "description": "Nombre de elemento UIA a esperar"
+    },
+    "automation_id": {
+     "type": "string",
+     "description": "Automation ID del elemento a esperar"
+    },
+    "modal_dialog": {
+     "type": "boolean",
+     "description": "Si es true, espera a que aparezca cualquier diálogo modal o ventana emergente hija"
+    },
+    "timeout_ms": {
+     "type": "number",
+     "description": "Tiempo máximo de espera en ms (default 5000, max 30000)"
+    },
+    "interval_ms": {
+     "type": "number",
+     "description": "Intervalo de comprobación en ms (default 250)"
+    }
+   },
+   "additionalProperties": false
+  },
+  "title": "Esperar condición",
+  "annotations": {
+   "readOnlyHint": true,
+   "destructiveHint": false,
+   "idempotentHint": true,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_login",
+  "description": "Abre URL en Chrome externo con selección directa de perfil de usuario (Google/Edge autenticado) o lista los perfiles detectados en el sistema.",
+  "inputSchema": {
+   "type": "object",
+   "additionalProperties": false,
+   "properties": {
+    "url": {
+     "type": "string",
+     "description": "URL a abrir"
+    },
+    "profile": {
+     "type": "string",
+     "description": "Nombre de perfil o correo (ej: 'Octavio', 'Gabriel', 'percatorone17@gmail.com', 'Profile 1')"
+    },
+    "list_profiles": {
+     "type": "boolean",
+     "description": "Si es true, enumera los perfiles locales de Chrome y Edge disponibles"
+    },
+    "account": {
+     "type": "string",
+     "description": "Email o nombre de cuenta a auto-seleccionar si el sitio muestra selector de cuentas"
+    },
+    "remote_debugging": {
+     "type": "boolean",
+     "description": "Habilita puerto de depuración CDP (--remote-debugging-port=9222) para automatización DOM directa"
+    }
+   }
+  },
+  "title": "Abrir URL (login)",
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": false,
+   "idempotentHint": false,
+   "openWorldHint": true
+  }
+ },
+ {
+  "name": "computer_find_element",
+  "description": "Busca controles UIA dentro de una ventana; devuelve candidatos, rectángulos físicos y patrones disponibles.",
+  "inputSchema": {
+   "type": "object",
+   "additionalProperties": false,
+   "properties": {
+    "name": {
+     "type": "string"
+    },
+    "automation_id": {
+     "type": "string"
+    },
+    "title": {
+     "type": "string"
+    },
+    "hwnd": {
+     "type": "number"
+    },
+    "control_type": {
+     "type": "string"
+    },
+    "timeout": {
+     "type": "number",
+     "minimum": 1,
+     "maximum": 30000
+    },
+    "max_depth": {
+     "type": "number",
+     "minimum": 1,
+     "maximum": 30
+    },
+    "max_results": {
+     "type": "number",
+     "minimum": 1,
+     "maximum": 1000
+    }
+   }
+  },
+  "title": "Buscar elemento UIA",
+  "annotations": {
+   "readOnlyHint": true,
+   "destructiveHint": false,
+   "idempotentHint": true,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_inspect_ui",
+  "description": "Inspecciona el árbol de controles UI Automation de la ventana activa o indicada. No usa captura de pantalla.",
+  "inputSchema": {
+   "type": "object",
+   "additionalProperties": false,
+   "properties": {
+    "title": {
+     "type": "string"
+    },
+    "hwnd": {
+     "type": "number"
+    },
+    "name": {
+     "type": "string"
+    },
+    "automation_id": {
+     "type": "string"
+    },
+    "control_type": {
+     "type": "string"
+    },
+    "max_depth": {
+     "type": "number",
+     "minimum": 1,
+     "maximum": 30
+    },
+    "max_results": {
+     "type": "number",
+     "minimum": 1,
+     "maximum": 1000
+    }
+   }
+  },
+  "title": "Inspeccionar UI",
+  "annotations": {
+   "readOnlyHint": true,
+   "destructiveHint": false,
+   "idempotentHint": true,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_ui_action",
+  "description": "Actúa sobre un control UIA sin mover el ratón: invoke, focus, toggle, expand, collapse, select o set_value. Acepta ref estable de computer_snapshot como alias de name/automation_id.",
+  "inputSchema": {
+   "type": "object",
+   "additionalProperties": false,
+   "properties": {
+    "name": {
+     "type": "string"
+    },
+    "automation_id": {
+     "type": "string"
+    },
+    "title": {
+     "type": "string"
+    },
+    "hwnd": {
+     "type": "number"
+    },
+    "control_type": {
+     "type": "string"
+    },
+    "ref": {
+     "type": "string",
+     "description": "Ref estable devuelta por computer_snapshot (resuelve name/automation_id/control_type)"
+    },
+    "action": {
+     "type": "string",
+     "enum": [
+      "invoke",
+      "focus",
+      "toggle",
+      "expand",
+      "collapse",
+      "select",
+      "set_value"
+     ]
+    },
+    "value": {
+     "type": "string"
+    },
+    "snapshot_after": {
+     "type": "boolean",
+     "description": "Si es true, toma automáticamente un snapshot fresco del estado tras la acción"
+    }
+   },
+   "required": [
+    "action"
+   ]
+  },
+  "title": "Acción UIA",
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": false,
+   "idempotentHint": false,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_snapshot",
+  "description": "Snapshot incremental del árbol UI Automation con refs estables. La primera llamada (o si hwnd/generation cambia) devuelve todo (mode 'full'); después devuelve solo added/changed (change 'new'|'changed') + refs removed. Cada elemento incluye ref estable (sobrevive re-render del contenido), i (ID 1..N compatible con computer_click {id}) y bounds [x,y,w,h]. Usar ref en computer_click/computer_double_click/computer_ui_action.",
+  "inputSchema": {
+   "type": "object",
+   "additionalProperties": false,
+   "properties": {
+    "hwnd": {
+     "type": "number",
+     "description": "HWND de la ventana (default ventana activa)"
+    },
+    "target_window": {
+     "type": "string",
+     "description": "Título de ventana para enfocar antes del snapshot"
+    },
+    "mode": {
+     "type": "string",
+     "enum": [
+      "auto",
+      "full",
+      "diff"
+     ],
+     "description": "auto (default): diff si hay estado previo válido, si no full"
+    },
+    "generation": {
+     "type": "number",
+     "description": "Generation del snapshot previo; si no coincide se fuerza full"
+    },
+    "include_patterns": {
+     "type": "boolean",
+     "description": "Incluye patrones UIA por elemento (default false, ahorra tokens)"
+    },
+    "max_depth": {
+     "type": "number",
+     "minimum": 1,
+     "maximum": 30
+    },
+    "max_results": {
+     "type": "number",
+     "minimum": 1,
+     "maximum": 1000
+    }
+   }
+  },
+  "title": "Snapshot UIA",
+  "annotations": {
+   "readOnlyHint": true,
+   "destructiveHint": false,
+   "idempotentHint": true,
+   "openWorldHint": false
+  },
+  "outputSchema": {
+   "type": "object",
+   "properties": {
+    "ok": {
+     "type": "boolean"
+    },
+    "mode": {
+     "type": "string"
+    },
+    "generation": {
+     "type": "number"
+    },
+    "hwnd": {
+     "type": "number"
+    },
+    "window_title": {
+     "type": "string"
+    },
+    "counts": {
+     "type": "object",
+     "properties": {
+      "total": {
+       "type": "number"
+      },
+      "new": {
+       "type": "number"
+      },
+      "changed": {
+       "type": "number"
+      },
+      "removed": {
+       "type": "number"
+      }
+     }
+    },
+    "elements": {
+     "type": "array",
+     "items": {
+      "type": "object"
+     }
+    },
+    "removed": {
+     "type": "array",
+     "items": {
+      "type": "object"
+     }
+    },
+    "truncated": {
+     "type": "boolean"
+    },
+    "error": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "ok"
+   ]
+  }
+ },
+ {
+  "name": "computer_state_fingerprint",
+  "description": "Huella SHA1 determinista del estado UIA actual (elementos ref|name|bounds|enabled + título + PID). Read-only: úsala antes/después de una acción para saber si el estado realmente cambió.",
+  "inputSchema": {
+   "type": "object",
+   "additionalProperties": false,
+   "properties": {
+    "hwnd": {
+     "type": "number"
+    },
+    "target_window": {
+     "type": "string"
+    },
+    "max_results": {
+     "type": "number",
+     "minimum": 1,
+     "maximum": 1000
+    }
+   }
+  },
+  "title": "Huella de estado",
+  "annotations": {
+   "readOnlyHint": true,
+   "destructiveHint": false,
+   "idempotentHint": true,
+   "openWorldHint": false
+  },
+  "outputSchema": {
+   "type": "object",
+   "properties": {
+    "ok": {
+     "type": "boolean"
+    },
+    "fingerprint": {
+     "type": [
+      "string",
+      "null"
+     ]
+    },
+    "window_title": {
+     "type": "string"
+    },
+    "element_count": {
+     "type": "number"
+    },
+    "ts": {
+     "type": "number"
+    },
+    "error": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "ok"
+   ]
+  }
+ },
+ {
+  "name": "computer_wait_stable",
+  "description": "Espera asíncrona (polling UIA, sin bloquear) hasta que la huella del estado se mantenga igual en stable_samples muestras consecutivas, o hasta el timeout. Devuelve stable:true y muestras/tiempo, o stable:false con last_change_ago_ms.",
+  "inputSchema": {
+   "type": "object",
+   "additionalProperties": false,
+   "properties": {
+    "hwnd": {
+     "type": "number"
+    },
+    "target_window": {
+     "type": "string"
+    },
+    "timeout_ms": {
+     "type": "number",
+     "description": "Default 10000, max 60000"
+    },
+    "interval_ms": {
+     "type": "number",
+     "description": "Intervalo de muestreo (default 300, min 100)"
+    },
+    "stable_samples": {
+     "type": "number",
+     "description": "Muestras iguales consecutivas necesarias (default 2)"
+    },
+    "max_results": {
+     "type": "number",
+     "minimum": 1,
+     "maximum": 1000
+    },
+    "async": {
+     "type": "boolean",
+     "default": false,
+     "description": "Si es true, arranca una task MCP 2026 y devuelve {task} de inmediato sin esperar el resultado (polling con tasks/get, payload con tasks/result, cancelable con tasks/cancel). Default false: comportamiento síncrono clásico intacto."
+    }
+   }
+  },
+  "title": "Esperar estabilidad",
+  "annotations": {
+   "readOnlyHint": true,
+   "destructiveHint": false,
+   "idempotentHint": true,
+   "openWorldHint": false
+  },
+  "outputSchema": {
+   "type": "object",
+   "properties": {
+    "ok": {
+     "type": "boolean"
+    },
+    "stable": {
+     "type": "boolean"
+    },
+    "elapsed_ms": {
+     "type": "number"
+    },
+    "samples": {
+     "type": "number"
+    },
+    "fingerprint": {
+     "type": [
+      "string",
+      "null"
+     ]
+    },
+    "window_title": {
+     "type": "string"
+    },
+    "last_change_ago_ms": {
+     "type": "number"
+    }
+   },
+   "required": [
+    "ok",
+    "stable"
+   ]
+  },
+  "execution": {
+   "taskSupport": "optional"
+  }
+ },
+ {
+  "name": "computer_verify",
+  "description": "Verifica expectativas sobre el estado UIA con polling: window_title_contains, element{name,automation_id,control_type,exists}, text_visible (solo UIA, sin OCR en v1), fingerprint_equals y fingerprint_changed_from. Status: confirmed|no_change|unexpected|timeout, con evidencia por check.",
+  "inputSchema": {
+   "type": "object",
+   "additionalProperties": false,
+   "properties": {
+    "hwnd": {
+     "type": "number"
+    },
+    "target_window": {
+     "type": "string"
+    },
+    "timeout_ms": {
+     "type": "number",
+     "description": "Default 3000"
+    },
+    "max_results": {
+     "type": "number",
+     "minimum": 1,
+     "maximum": 1000
+    },
+    "expect": {
+     "type": "object",
+     "properties": {
+      "window_title_contains": {
+       "type": "string"
+      },
+      "element": {
+       "type": "object",
+       "properties": {
+        "name": {
+         "type": "string"
+        },
+        "automation_id": {
+         "type": "string"
+        },
+        "control_type": {
+         "type": "string"
+        },
+        "exists": {
+         "type": "boolean",
+         "description": "true (default)=debe existir; false=no debe existir"
+        }
+       }
+      },
+      "text_visible": {
+       "type": "string",
+       "description": "Texto visible vía UIA (sin OCR en v1)"
+      },
+      "fingerprint_equals": {
+       "type": "string"
+      },
+      "fingerprint_changed_from": {
+       "description": "String de fingerprint previo, o true para usar el último computer_state_fingerprint"
+      }
+     }
+    }
+   },
+   "required": [
+    "expect"
+   ]
+  },
+  "title": "Verificar expectativas",
+  "annotations": {
+   "readOnlyHint": true,
+   "destructiveHint": false,
+   "idempotentHint": true,
+   "openWorldHint": false
+  },
+  "outputSchema": {
+   "type": "object",
+   "properties": {
+    "ok": {
+     "type": "boolean"
+    },
+    "status": {
+     "type": "string",
+     "enum": [
+      "confirmed",
+      "no_change",
+      "unexpected",
+      "timeout"
+     ]
+    },
+    "fingerprint": {
+     "type": [
+      "string",
+      "null"
+     ]
+    },
+    "elapsed_ms": {
+     "type": "number"
+    },
+    "window_title": {
+     "type": "string"
+    },
+    "checks": {
+     "type": "array",
+     "items": {
+      "type": "object"
+     }
+    }
+   },
+   "required": [
+    "ok",
+    "status"
+   ]
+  }
+ },
+ {
+  "name": "computer_macro_record",
+  "description": "Graba una macro: cada tool call posterior (excepto los propios computer_macro_*) se registra como paso con args saneados (secretos redactados, strings largos truncados). action:'start' exige name; 'stop' persiste la macro y devuelve {ok,name,step_count,path}; 'status' informa si hay grabación activa y cuántos pasos lleva.",
+  "inputSchema": {
+   "type": "object",
+   "additionalProperties": false,
+   "properties": {
+    "action": {
+     "type": "string",
+     "enum": [
+      "start",
+      "stop",
+      "status"
+     ],
+     "description": "start inicia grabación, stop la detiene y guarda, status consulta el estado"
+    },
+    "name": {
+     "type": "string",
+     "description": "Nombre de la macro (se normaliza a slug). Requerido en start"
+    }
+   },
+   "required": [
+    "action"
+   ]
+  },
+  "title": "Grabar macro",
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": false,
+   "idempotentHint": false,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_macro_list",
+  "description": "Lista las macros guardadas con name, step_count, created_at, updated_at y last_replay si ya se reprodujo alguna vez.",
+  "inputSchema": {
+   "type": "object",
+   "additionalProperties": false,
+   "properties": {}
+  },
+  "title": "Listar macros",
+  "annotations": {
+   "readOnlyHint": true,
+   "destructiveHint": false,
+   "idempotentHint": true,
+   "openWorldHint": false
+  },
+  "outputSchema": {
+   "type": "object",
+   "properties": {
+    "macros": {
+     "type": "array",
+     "items": {
+      "type": "object"
+     }
+    }
+   },
+   "required": [
+    "macros"
+   ]
+  }
+ },
+ {
+  "name": "computer_macro_delete",
+  "description": "Elimina una macro guardada (destructivo: exige confirm:true).",
+  "inputSchema": {
+   "type": "object",
+   "additionalProperties": false,
+   "properties": {
+    "name": {
+     "type": "string",
+     "description": "Nombre o slug de la macro a eliminar"
+    },
+    "confirm": {
+     "type": "boolean",
+     "description": "Debe ser true para confirmar el borrado"
+    }
+   },
+   "required": [
+    "name"
+   ]
+  },
+  "title": "Eliminar macro",
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": true,
+   "idempotentHint": false,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_macro_replay",
+  "description": "Reproduce una macro con auto-reparación: si un paso de click falla, hace snapshot UIA de la ventana objetivo y reintenta con el mejor match de su __element (ref o coordenadas), persistiendo el paso curado (healed_count). Soporta overrides de secretos por índice de paso y speed para la pausa base de 250ms entre acciones de input.",
+  "inputSchema": {
+   "type": "object",
+   "additionalProperties": false,
+   "properties": {
+    "name": {
+     "type": "string",
+     "description": "Nombre o slug de la macro a reproducir"
+    },
+    "dry_run": {
+     "type": "boolean",
+     "description": "Si es true, valida que la macro exista y devuelve el plan sin ejecutar nada (default false)"
+    },
+    "stop_on_failure": {
+     "type": "boolean",
+     "description": "Detiene el replay en el primer fallo no reparado (default true)"
+    },
+    "speed": {
+     "type": "number",
+     "description": "Multiplicador de velocidad de la pausa entre acciones de input (default 1)"
+    },
+    "heal": {
+     "type": "boolean",
+     "description": "Auto-reparación de pasos de click con snapshot + bestMatch (default true)"
+    },
+    "overrides": {
+     "type": "object",
+     "description": "Inyección de secretos en runtime: { \"<stepIndex>\": { \"secret_b64\" | \"text\": \"valor\" } }",
+     "additionalProperties": {
+      "type": "object"
+     }
+    },
+    "async": {
+     "type": "boolean",
+     "default": false,
+     "description": "Si es true, arranca una task MCP 2026 y devuelve {task} de inmediato sin esperar el resultado (polling con tasks/get, payload con tasks/result, cancelable con tasks/cancel). Default false: comportamiento síncrono clásico intacto."
+    }
+   },
+   "required": [
+    "name"
+   ]
+  },
+  "title": "Reproducir macro",
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": false,
+   "idempotentHint": false,
+   "openWorldHint": false
+  },
+  "execution": {
+   "taskSupport": "optional"
+  }
+ },
+ {
+  "name": "computer_process_tree",
+  "description": "Devuelve el árbol de procesos Windows (PID, padre, ejecutable y descendientes) para una aplicación o todo el escritorio.",
+  "inputSchema": {
+   "type": "object",
+   "additionalProperties": false,
+   "properties": {
+    "pid": {
+     "type": "number",
+     "minimum": 1
+    },
+    "max_depth": {
+     "type": "number",
+     "minimum": 1,
+     "maximum": 20
+    },
+    "include_command_line": {
+     "type": "boolean"
+    }
+   }
+  },
+  "title": "Árbol de procesos",
+  "annotations": {
+   "readOnlyHint": true,
+   "destructiveHint": false,
+   "idempotentHint": true,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_ocr",
+  "description": "OCR local sobre una región o ventana. Soporta PaddleOCR y Windows.Media.Ocr nativo. Permite 'query' para filtrar texto directo (ahorra 95% de tokens) y 'group_lines' para agrupar por líneas.",
+  "inputSchema": {
+   "type": "object",
+   "additionalProperties": false,
+   "properties": {
+    "x": {
+     "type": "number"
+    },
+    "y": {
+     "type": "number"
+    },
+    "w": {
+     "type": "number",
+     "minimum": 1
+    },
+    "h": {
+     "type": "number",
+     "minimum": 1
+    },
+    "hwnd": {
+     "type": "number"
+    },
+    "query": {
+     "type": "string",
+     "description": "Filtra y devuelve solo los items que coincidan con este texto (ahorro drástico de tokens)"
+    },
+    "group_lines": {
+     "type": "boolean",
+     "description": "Si es true, agrupa palabras adyacentes en una sola línea/bloque de texto con su caja englobante"
+    },
+    "language": {
+     "type": "string",
+     "minLength": 2,
+     "maxLength": 12
+    },
+    "device": {
+     "type": "string",
+     "enum": [
+      "auto",
+      "cpu",
+      "gpu",
+      "gpu:0"
+     ]
+    },
+    "min_confidence": {
+     "type": "number",
+     "minimum": 0,
+     "maximum": 1
+    },
+    "max_results": {
+     "type": "number",
+     "minimum": 1,
+     "maximum": 1000
+    }
+   }
+  },
+  "title": "OCR local",
+  "annotations": {
+   "readOnlyHint": true,
+   "destructiveHint": false,
+   "idempotentHint": true,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_list_windows",
+  "description": "Lista ventanas abiertas visibles con HWND, título y bounding boxes.",
+  "inputSchema": {
+   "type": "object",
+   "additionalProperties": false,
+   "properties": {
+    "filter": {
+     "type": "string"
+    }
+   }
+  },
+  "title": "Listar ventanas",
+  "annotations": {
+   "readOnlyHint": true,
+   "destructiveHint": false,
+   "idempotentHint": true,
+   "openWorldHint": false
+  },
+  "outputSchema": {
+   "type": "object",
+   "properties": {
+    "windows": {
+     "type": "array",
+     "items": {
+      "type": "object"
+     }
+    }
+   },
+   "required": [
+    "windows"
+   ]
+  }
+ },
+ {
+  "name": "shell_exec",
+  "description": "Ejecuta comando en PowerShell (cwd configurable, timeout seguro).",
+  "inputSchema": {
+   "type": "object",
+   "additionalProperties": false,
+   "properties": {
+    "command": {
+     "type": "string",
+     "minLength": 1
+    },
+    "cwd": {
+     "type": "string"
+    },
+    "timeout": {
+     "type": "number",
+     "minimum": 1,
+     "maximum": 600000
+    },
+    "isolated_desktop": {
+     "type": "boolean",
+     "description": "Ejecuta el proceso en un escritorio Win32 aislado (Winsta0\\CodexSandboxDesk) sin interferir con la pantalla del usuario"
+    }
+   },
+   "required": [
+    "command"
+   ]
+  },
+  "title": "Ejecutar shell",
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": true,
+   "idempotentHint": false,
+   "openWorldHint": true
+  }
+ },
+ {
+  "name": "shell_background",
+  "description": "Lanza proceso en segundo plano (retorna PID).",
+  "inputSchema": {
+   "type": "object",
+   "additionalProperties": false,
+   "properties": {
+    "command": {
+     "type": "string",
+     "minLength": 1
+    },
+    "cwd": {
+     "type": "string"
+    },
+    "isolated_desktop": {
+     "type": "boolean",
+     "description": "Lanza el proceso en segundo plano en un escritorio Win32 aislado (Winsta0\\CodexSandboxDesk)"
+    }
+   },
+   "required": [
+    "command"
+   ]
+  },
+  "title": "Shell en segundo plano",
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": true,
+   "idempotentHint": false,
+   "openWorldHint": true
+  }
+ },
+ {
+  "name": "computer_wait_download",
+  "description": "Monitorea de forma no bloqueante la carpeta de descargas de Windows hasta que una descarga finaliza (espera a que desaparezca .crdownload / .tmp / .part) y retorna la ruta del archivo, tamaño y SHA256.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "timeout_seconds": {
+     "type": "number",
+     "description": "Tiempo máximo de espera en segundos (default 30)"
+    },
+    "download_dir": {
+     "type": "string",
+     "description": "Carpeta a monitorear (default Downloads del usuario)"
+    },
+    "expected_ext": {
+     "type": "string",
+     "description": "Extensión esperada del archivo descargado (ej: 'exe', 'pdf', 'zip')"
+    }
+   },
+   "additionalProperties": false
+  },
+  "title": "Esperar descarga",
+  "annotations": {
+   "readOnlyHint": true,
+   "destructiveHint": false,
+   "idempotentHint": true,
+   "openWorldHint": true
+  }
+ },
+ {
+  "name": "computer_find_template",
+  "description": "Localiza iconos visuales sin texto ni UIA (lupas, engranajes, papeleras, botones gráficos) mediante Template Matching 2D en C# GDI+ (~40ms, 0 tokens de visión). Devuelve coordenadas x,y para clic directo.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "template_b64": {
+     "type": "string",
+     "description": "Imagen base64 del icono o patrón a buscar"
+    },
+    "min_confidence": {
+     "type": "number",
+     "description": "Umbral mínimo de similitud entre 0.0 y 1.0 (default 0.75)"
+    },
+    "hwnd": {
+     "type": "number",
+     "description": "HWND de la ventana objetivo donde buscar (opcional, default ventana activa)"
+    }
+   },
+   "required": [
+    "template_b64"
+   ],
+   "additionalProperties": false
+  },
+  "title": "Buscar plantilla visual",
+  "annotations": {
+   "readOnlyHint": true,
+   "destructiveHint": false,
+   "idempotentHint": true,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_monitor_action",
+  "description": "Gestión avanzada de multi-pantalla: 'list' (enumera monitores, DPI, coordenadas), 'move_to_monitor' (mueve ventana al monitor N), 'screenshot_monitor' (captura monitor específico).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "action": {
+     "type": "string",
+     "enum": [
+      "list",
+      "move_to_monitor",
+      "screenshot_monitor"
+     ],
+     "description": "Acción a ejecutar"
+    },
+    "monitor_index": {
+     "type": "number",
+     "description": "Índice de pantalla (1, 2, 3...) para mover o capturar"
+    },
+    "target_window": {
+     "type": "string",
+     "description": "Enfoca una ventana específica antes de moverla"
+    }
+   },
+   "required": [
+    "action"
+   ],
+   "additionalProperties": false
+  },
+  "title": "Acciones de monitor",
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": false,
+   "idempotentHint": false,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_read_selection",
+  "description": "Lee de inmediato texto seleccionado o resaltado en cualquier aplicación (PDFs, editores, Canvas) simulando copia atómica y restaurando el portapapeles original del usuario (~50ms).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "select_all": {
+     "type": "boolean",
+     "description": "Si es true, presiona Ctrl+A antes de copiar"
+    },
+    "click_pos": {
+     "type": "object",
+     "properties": {
+      "x": {
+       "type": "number"
+      },
+      "y": {
+       "type": "number"
+      }
+     },
+     "required": [
+      "x",
+      "y"
+     ],
+     "description": "Coordenadas donde hacer doble clic para seleccionar una palabra antes de copiar"
+    },
+    "target_window": {
+     "type": "string",
+     "description": "Enfoca la ventana antes de leer"
+    }
+   },
+   "additionalProperties": false
+  },
+  "title": "Leer selección",
+  "annotations": {
+   "readOnlyHint": true,
+   "destructiveHint": false,
+   "idempotentHint": true,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_check_health",
+  "description": "Comprueba si la ventana activa está congelada ('No responde'), si hay un diálogo de administrador / UAC bloqueando la pantalla (Secure Desktop) y métricas de CPU/RAM.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "hwnd": {
+     "type": "number",
+     "description": "HWND de la ventana a comprobar (default ventana activa)"
+    },
+    "auto_alert": {
+     "type": "boolean",
+     "description": "Si es true y UAC está activo, emite una alerta sonora al usuario (default true)"
+    }
+   },
+   "additionalProperties": false
+  },
+  "title": "Chequear salud app/UAC",
+  "annotations": {
+   "readOnlyHint": true,
+   "destructiveHint": false,
+   "idempotentHint": true,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_bulk_input",
+  "description": "Inyección atómica masiva de matrices de datos en tablas y hojas de cálculo (Excel, Google Sheets, ERPs) en 1 solo paso (~100ms) mediante pegado de cuadrícula TSV.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "rows": {
+     "type": "array",
+     "items": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     },
+     "description": "Matriz 2D de filas y columnas a inyectar"
+    },
+    "target_x": {
+     "type": "number",
+     "description": "Coordenada X de la celda inicial"
+    },
+    "target_y": {
+     "type": "number",
+     "description": "Coordenada Y de la celda inicial"
+    },
+    "target_window": {
+     "type": "string",
+     "description": "Enfoca la ventana de la hoja de cálculo antes de inyectar"
+    }
+   },
+   "required": [
+    "rows"
+   ],
+   "additionalProperties": false
+  },
+  "title": "Inyección masiva de datos",
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": true,
+   "idempotentHint": false,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_system_tray",
+  "description": "Control e inspección completa de la bandeja del sistema (System Tray) y del área oculta (Overflow / Chevron). Permite listar todos los iconos activos con su tooltip, proceso y coordenadas absolutas, así como hacer clic izquierdo, clic derecho (para menús contextuales de fondo) o doble clic sobre cualquier icono por nombre o índice.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "action": {
+     "type": "string",
+     "enum": [
+      "list",
+      "click",
+      "right_click",
+      "double_click"
+     ],
+     "default": "list",
+     "description": "Acción a realizar: 'list' (enumera iconos visibles y ocultos), 'click' (clic izquierdo), 'right_click' (clic derecho para abrir menú contextual), 'double_click' (doble clic)"
+    },
+    "target": {
+     "type": "string",
+     "description": "Texto o palabra clave a buscar en el tooltip del icono, nombre accesible o nombre del proceso (ej: 'Steam', 'Tailscale', 'Everything', 'Antigravity')"
+    },
+    "index": {
+     "type": "number",
+     "description": "Índice numérico del icono obtenido previamente con 'list'"
+    },
+    "include_overflow": {
+     "type": "boolean",
+     "default": true,
+     "description": "Si es true (default), incluye también los iconos del área oculta / flyout de desbordamiento"
+    }
+   },
+   "additionalProperties": false
+  },
+  "title": "Bandeja del sistema",
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": false,
+   "idempotentHint": false,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_toast_action",
+  "description": "Lectura, descarte e interacción directa con las notificaciones Toast de Windows (Action Center / Notification Platform). Permite listar notificaciones activas con su emisor, título, cuerpo y timestamp, descartar notificaciones individuales o masivas, y presionar botones de acción rápida en 1 solo paso.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "action": {
+     "type": "string",
+     "enum": [
+      "list",
+      "dismiss",
+      "clear_all",
+      "click_button"
+     ],
+     "default": "list",
+     "description": "Acción a realizar: 'list' (obtiene notificaciones activas), 'dismiss' (descarta una notificación por ID), 'clear_all' (limpia todas), 'click_button' (hace clic en un botón de acción)"
+    },
+    "id": {
+     "type": "number",
+     "description": "ID de la notificación (requerido para 'dismiss')"
+    },
+    "notification_id": {
+     "type": "number",
+     "description": "Alias de id: ID de la notificación para 'dismiss'"
+    },
+    "button_text": {
+     "type": "string",
+     "description": "Texto exacto o etiqueta del botón de acción a pulsar (requerido para 'click_button')"
+    },
+    "app_filter": {
+     "type": "string",
+     "description": "Filtro opcional por nombre de la aplicación emisora (ej: 'WhatsApp', 'Chrome', 'Seguridad de Windows')"
+    }
+   },
+   "additionalProperties": false
+  },
+  "title": "Notificaciones toast",
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": false,
+   "idempotentHint": false,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_context_menu",
+  "description": "Abre un menú contextual efímero con clic derecho y selecciona un elemento en 1 solo turno atómico. Evita la pérdida de foco y el cierre accidental del menú, permitiendo elegir opciones por texto ('item_text' / 'select_text') o por secuencia de teclas direccionales ('keys' / 'key_sequence', ej: ['down', 'down', 'enter']).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "x": {
+     "type": "number",
+     "description": "Coordenada horizontal X donde ejecutar el clic derecho"
+    },
+    "y": {
+     "type": "number",
+     "description": "Coordenada vertical Y donde ejecutar el clic derecho"
+    },
+    "item_text": {
+     "type": "string",
+     "description": "Texto o subcadena del ítem del menú contextual a seleccionar (ej: 'Copiar', 'Propiedades', 'Abrir con', 'Pegar')"
+    },
+    "select_text": {
+     "type": "string",
+     "description": "Alias de item_text: texto o subcadena a seleccionar"
+    },
+    "keys": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "Secuencia de teclas para navegar el menú si no se usa texto (ej: ['down', 'enter'], ['down', 'down', 'right', 'enter'])"
+    },
+    "key_sequence": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "Alias de keys: secuencia de teclas para navegar el menú"
+    },
+    "delay_ms": {
+     "type": "number",
+     "default": 150,
+     "description": "Tiempo de espera en ms entre el clic derecho y la selección (default 150ms)"
+    }
+   },
+   "required": [
+    "x",
+    "y"
+   ],
+   "additionalProperties": false
+  },
+  "title": "Menú contextual",
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": false,
+   "idempotentHint": false,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_drag_scroll",
+  "description": "Gestos avanzados de arrastre sostenido y selección por caja: realiza selección elástica (rubber-band) con modificadores de teclado (Ctrl/Shift/Alt) o arrastre sostenido hacia los márgenes de ventanas/documentos provocando scroll continuo (drag-to-scroll).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "mode": {
+     "type": "string",
+     "enum": [
+      "rubber_band",
+      "drag_scroll"
+     ],
+     "default": "rubber_band",
+     "description": "Modo: 'rubber_band' para recuadro de selección elástica, 'drag_scroll' para arrastre sostenido hacia el margen con auto-scroll."
+    },
+    "from_x": {
+     "type": "number",
+     "description": "Coordenada X de origen"
+    },
+    "from_y": {
+     "type": "number",
+     "description": "Coordenada Y de origen"
+    },
+    "to_x": {
+     "type": "number",
+     "description": "Coordenada X de destino (o margen del visor)"
+    },
+    "to_y": {
+     "type": "number",
+     "description": "Coordenada Y de destino (o margen del visor)"
+    },
+    "button": {
+     "type": "string",
+     "enum": [
+      "left",
+      "right",
+      "middle"
+     ],
+     "default": "left",
+     "description": "Botón del ratón para el arrastre (default 'left')"
+    },
+    "modifiers": {
+     "type": "array",
+     "items": {
+      "type": "string",
+      "enum": [
+       "ctrl",
+       "shift",
+       "alt"
+      ]
+     },
+     "description": "Teclas modificadoras sostenidas durante el arrastre (ej: ['ctrl'] o ['shift'])"
+    },
+    "steps": {
+     "type": "number",
+     "default": 14,
+     "description": "Cantidad de pasos de interpolación suave (curva cúbica de Hermite)"
+    },
+    "delay_ms": {
+     "type": "number",
+     "default": 15,
+     "description": "Retardo en ms entre pasos de movimiento"
+    },
+    "hold_duration_ms": {
+     "type": "number",
+     "default": 800,
+     "description": "Tiempo en ms para sostener el arrastre en el margen (solo en modo drag_scroll)"
+    },
+    "scroll_pulses": {
+     "type": "number",
+     "default": 0,
+     "description": "Cantidad de pulsos de scroll de rueda emitidos durante la retención en el margen"
+    },
+    "scroll_delta": {
+     "type": "number",
+     "default": -120,
+     "description": "Delta de scroll de rueda por pulso (negativo=abajo, positivo=arriba)"
+    },
+    "release": {
+     "type": "boolean",
+     "default": true,
+     "description": "Si es true (default), suelta el botón al finalizar el gesto"
+    }
+   },
+   "required": [
+    "from_x",
+    "from_y",
+    "to_x",
+    "to_y"
+   ],
+   "additionalProperties": false
+  },
+  "title": "Arrastre/scroll avanzado",
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": false,
+   "idempotentHint": false,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_calibrate_dpi",
+  "description": "Diagnostica el modo de DPI (Per-Monitor v2, Per-Monitor v1, System DPI o DPI Unaware) de ventanas y monitores, y traduce transparentemente coordenadas lógicas/cliente a coordenadas físicas de pantalla en entornos multi-monitor.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "target_window": {
+     "type": "string",
+     "description": "Título o fragmento del nombre de la ventana objetivo para diagnosticar"
+    },
+    "hwnd": {
+     "type": "number",
+     "description": "Handle HWND específico de la ventana (opcional, prioridad sobre target_window)"
+    },
+    "x": {
+     "type": "number",
+     "description": "Coordenada X a calibrar/traducir"
+    },
+    "y": {
+     "type": "number",
+     "description": "Coordenada Y a calibrar/traducir"
+    },
+    "point": {
+     "type": "object",
+     "properties": {
+      "x": {
+       "type": "number"
+      },
+      "y": {
+       "type": "number"
+      }
+     },
+     "description": "Objeto punto {x, y} alternativo a parámetros directos x, y"
+    },
+    "convert": {
+     "type": "string",
+     "enum": [
+      "logical_to_physical",
+      "physical_to_logical",
+      "client_to_screen",
+      "screen_to_client"
+     ],
+     "description": "Modo de conversión explícito (ej: 'logical_to_physical' o 'physical_to_logical')"
+    },
+    "from_coord_type": {
+     "type": "string",
+     "enum": [
+      "auto",
+      "logical",
+      "physical",
+      "client"
+     ],
+     "default": "auto",
+     "description": "Tipo de coordenada de origen"
+    },
+    "to_coord_type": {
+     "type": "string",
+     "enum": [
+      "physical",
+      "logical",
+      "screen",
+      "client"
+     ],
+     "default": "physical",
+     "description": "Tipo de coordenada de destino"
+    }
+   },
+   "additionalProperties": false
+  },
+  "title": "Calibrar DPI",
+  "annotations": {
+   "readOnlyHint": true,
+   "destructiveHint": false,
+   "idempotentHint": true,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_audio_action",
+  "description": "Control y monitoreo de audio del sistema en tiempo real: detecta reproducción activa de sonido (is_playing_audio), nivel de pico (peak), volumen maestro del sistema (0-100), estado de silencio (mute/unmute) y procesos con sesiones de audio activas.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "action": {
+     "type": "string",
+     "enum": [
+      "status",
+      "set_volume",
+      "set_mute",
+      "mute",
+      "unmute",
+      "toggle_mute"
+     ],
+     "default": "status",
+     "description": "Acción de audio a ejecutar: 'status' (consulta estado y reproducción activa), 'set_volume' (ajusta volumen maestro), 'set_mute' (ajusta estado de silencio según parámetro 'mute'), 'mute' (silencia), 'unmute' (quita silencio), 'toggle_mute' (conmuta silencio)"
+    },
+    "volume": {
+     "type": "number",
+     "minimum": 0,
+     "maximum": 100,
+     "description": "Nivel de volumen maestro (0-100) para la acción 'set_volume'"
+    },
+    "mute": {
+     "type": "boolean",
+     "description": "Estado de silencio (true para silenciar, false para reactivar) para 'set_mute'"
+    }
+   },
+   "additionalProperties": false
+  },
+  "title": "Acciones de audio",
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": false,
+   "idempotentHint": false,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_lock",
+  "description": "Lock multi-agente cross-proceso para el escritorio: evita que dos sesiones/agentes opencode peleen el foreground (input real) o pisen la misma ventana con acciones UIA/background. Los tools mutantes adquieren su lock automáticamente (desktop/hwnd/app) y lo liberan al terminar; este tool permite inspeccionar (status), tomar un lock manual más largo (acquire), renovarlo (extend), liberar los propios (release) o forzar la liberación de otro agente (force, requiere confirm:true). Si un lock está vencido (TTL) es robable y queda logueado lock_stolen_stale.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "action": {
+     "type": "string",
+     "enum": [
+      "acquire",
+      "release",
+      "status",
+      "extend",
+      "force"
+     ],
+     "default": "status",
+     "description": "'status' (default) lista locks activos con dueño/scope/edad/expiración; 'acquire' toma un lock manual (scope, ttl_ms, wait_ms); 'release' libera los locks propios (scope opcional); 'extend' renueva los propios (ttl_ms); 'force' libera el lock de un scope aunque sea de otro agente (exige confirm:true)."
+    },
+    "scope": {
+     "type": "string",
+     "description": "Scope del lock: 'desktop' (input real; conflictúa con todo), 'hwnd:<n>' (ventana UIA/background) o 'app:<exe>' (proceso sin hwnd). Default 'desktop' en acquire; opcional en release/status/force."
+    },
+    "ttl_ms": {
+     "type": "number",
+     "description": "TTL del lock en ms (default 15000; mín 1000, máx 600000). Un lock vencido es robable."
+    },
+    "wait_ms": {
+     "type": "number",
+     "description": "Espera máxima para adquirir el lock (0..10000; default 0 = falla rápido con desktop_busy/window_busy)."
+    },
+    "confirm": {
+     "type": "boolean",
+     "description": "Obligatorio true para action:'force' (liberar el lock de otro agente)."
+    }
+   },
+   "additionalProperties": false
+  },
+  "title": "Lock multi-agente",
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": true,
+   "idempotentHint": false,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_incidents",
+  "description": "Journal local de incidentes (fallos de tools) con clasificación heurística, firma agrupable y export en markdown para análisis RSI (auto-mejora). Registra automáticamente excepciones, isError:true y structuredContent.code de error con args redactados (secretos ocultos, strings truncados), duración, target, agente y sesión. Acciones: list (últimas entradas), get (entrada completa con stack), summary (grupos tool+clase+firma con counts), export (markdown listo para pegar en una sesión de análisis), note (anexa resolución/fix a un incidente), clear (vacía el journal, requiere confirm:true).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "action": {
+     "type": "string",
+     "enum": [
+      "list",
+      "get",
+      "summary",
+      "export",
+      "note",
+      "clear"
+     ],
+     "default": "list",
+     "description": "'list' (default) devuelve las últimas entradas sin stack; 'get' requiere id y devuelve la entrada completa; 'summary' agrupa por tool+error_class+firma; 'export' genera markdown RSI; 'note' anexa {note, fix} a un id; 'clear' vacía el journal (confirm:true)."
+    },
+    "id": {
+     "type": "string",
+     "description": "ID del incidente (inc_<ts>_<rand>) para get/note."
+    },
+    "tool": {
+     "type": "string",
+     "description": "Filtro por tool (list/summary/export)."
+    },
+    "error_class": {
+     "type": "string",
+     "description": "Filtro por error_class: timeout|not_found|access_denied|blocked_browser|barrier|capture_failure|invalid_args|busy|cancelled|app_error."
+    },
+    "since": {
+     "type": "string",
+     "description": "Filtro ISO: sólo incidentes con ts >= since (ej. 2026-09-12T00:00:00Z)."
+    },
+    "limit": {
+     "type": "number",
+     "description": "Máximo de entradas (default 50; list/export)."
+    },
+    "note": {
+     "type": "string",
+     "description": "Resolución a anexar (action:'note')."
+    },
+    "fix": {
+     "type": "string",
+     "description": "Fix aplicado o propuesto (action:'note', opcional)."
+    },
+    "confirm": {
+     "type": "boolean",
+     "description": "Obligatorio true para action:'clear'."
+    }
+   },
+   "additionalProperties": false
+  },
+  "title": "Incidentes (RSI)",
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": true,
+   "idempotentHint": false,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_awake",
+  "description": "Evita que Windows apague la pantalla o entre en suspensión durante tareas largas o nocturnas del agente usando Win32 SetThreadExecutionState. mode: 'display' (default, mantiene monitor encendido) o 'system' (solo procesador activo).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "enabled": {
+     "type": "boolean",
+     "description": "true para activar modo awake, false para liberar y volver a la gestión de energía normal de Windows"
+    },
+    "mode": {
+     "type": "string",
+     "enum": [
+      "display",
+      "system"
+     ],
+     "description": "default 'display'"
+    },
+    "reason": {
+     "type": "string",
+     "description": "Motivo de la prevención de suspensión (ej: 'long_running_macro')"
+    }
+   },
+   "required": [
+    "enabled"
+   ],
+   "additionalProperties": false
+  },
+  "title": "Modo antisuspensión",
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": false,
+   "idempotentHint": true,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_indicator",
+  "description": "Muestra un indicador visual flotante (HUD pill) en pantalla y/o cambia el puntero del mouse del sistema a modo de trabajo (working/busy/crosshair) para avisar al usuario que el agente está tomando control o requiere atención.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "action": {
+     "type": "string",
+     "enum": [
+      "show",
+      "hide",
+      "set_cursor",
+      "reset_cursor"
+     ],
+     "description": "Acción a realizar: show (default), hide, set_cursor o reset_cursor"
+    },
+    "message": {
+     "type": "string",
+     "description": "Texto a mostrar en el banner flotante (ej: '🤖 Agente operando el ratón...', '⚠️ Atención requerida')"
+    },
+    "type": {
+     "type": "string",
+     "enum": [
+      "working",
+      "attention",
+      "success",
+      "info"
+     ],
+     "description": "Tema visual del indicador (default working)"
+    },
+    "cursor": {
+     "type": "string",
+     "enum": [
+      "working",
+      "busy",
+      "crosshair",
+      "hand",
+      "normal",
+      "none"
+     ],
+     "description": "Puntero del mouse a aplicar (working = spinner/flecha, busy = reloj/espera, normal = default)"
+    },
+    "duration_ms": {
+     "type": "number",
+     "description": "Duración en ms tras la cual se oculta solo (default 3000, 0 = persistente hasta hide)"
+    },
+    "sound": {
+     "type": "boolean",
+     "description": "Reproduce sonido de aviso suave al mostrar (default false)"
+    },
+    "position": {
+     "type": "string",
+     "enum": [
+      "top_left",
+      "top_center",
+      "top_right",
+      "bottom_right",
+      "bottom_center"
+     ],
+     "description": "Posición en pantalla (default top_left)"
+    }
+   },
+   "additionalProperties": false
+  },
+  "title": "Indicador de actividad del agente",
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": false,
+   "idempotentHint": true,
+   "openWorldHint": false
+  }
+ },
+ {
+  "name": "computer_dismiss_overlay",
+  "description": "Detecta y cierra modales superpuestos, consentimientos de cookies (MercadoLibre, Facebook, X, etc.) o fondos oscurecidos mediante clics dirigidos en botones de aceptación/cierre o pulsando Escape.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "target_window": {
+     "type": "string",
+     "description": "Título de la ventana objetivo (opcional, default ventana activa)"
+    },
+    "max_attempts": {
+     "type": "number",
+     "description": "Número de intentos de inspección y pulsación (default 3, min 1, max 5)"
+    }
+   },
+   "additionalProperties": false
+  },
+  "title": "Cerrar modal/overlay o cookies",
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": false,
+   "idempotentHint": false,
+   "openWorldHint": false
+  }
+ }
+]
